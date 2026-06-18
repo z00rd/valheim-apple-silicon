@@ -1,0 +1,11 @@
+# Sekrety i dane lokalne — NIGDY do repo
+.env
+backups/
+.caffeinate.pid
+*.log
+
+# Osobisty dziennik debugowania (zawiera prywatne IP/daty). Lekcje są w TROUBLESHOOTING.md.
+SETUP-LOG.md
+
+# macOS
+.DS_Store
