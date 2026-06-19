@@ -75,6 +75,10 @@ tailnetu (w tym np. Home Assistant); Share daje dostęp tylko do węzła z serwe
 - Domyślny ACL przepuszcza porty gry (2456-2457) dla udostępnionych — nic nie konfigurujesz.
 - Znajomi łączą się po `100.x.y.z:2456` (IPv4 z Tailscale).
 
+> Wyjątek: jeśli walczysz z lagiem zdalnego gracza i chcesz **Peer Relay** (patrz #14), Share to
+> **blokuje** — wtedy musisz zaprosić gracza jako **usera** (i najlepiej zawęzić ACL, by nie wystawiać
+> mu całej sieci). Samo Share nie jest przyczyną lagów (patrz #14), ale blokuje peer-relay i subnet-routes.
+
 ### 11. Mac zasypia podczas gry
 `play.sh` uruchamia `caffeinate` — działa przy **otwartej klapie / na zasilaniu**. Zamknięta klapa:
 ```bash
@@ -97,3 +101,32 @@ Backupy świata: `./scripts/backup.sh` → `./backups/` (robi to też `stop.sh`)
 colima delete valheim --force     # kasuje VM (świat ginie, jeśli nie masz backupu!)
 ./scripts/setup.sh
 ```
+
+### 14. Rubber-banding / lagi u ZDALNEGO gracza (a host-lokalny gra OK)
+Postacie „ślizgają się", mob teleportuje się martwy, lądy ładują się wolno przy żeglowaniu, w grze miga
+ikonka sieci — ale **tylko** u zdalnego gracza; host i gracze w tej samej sieci grają płynnie.
+To **NIE emulacja** (CPU ma zapas; gdyby nie nadążał serwer, ścinałoby wszystkich równo) ani **niczyje łącze**.
+To **relay DERP** Tailscale dla zdalnego peera.
+
+**Przyczyna:** serwer w VM siedzi za **symetrycznym NAT-em** QEMU (slirp). Tailscale nie przebije go do
+direct dla zdalnego/cross-tailnet peera → spada na relay → jitter/dropy.
+
+**Diagnoza:**
+```bash
+docker exec valheim-ts tailscale netcheck        # MappingVariesByDestIP: true = symetryczny NAT
+docker exec valheim-ts tailscale ping <peer-ip>  # "via DERP" = relay, "direct" = OK
+```
+Poproś też zdalnego gracza o `tailscale netcheck` u SIEBIE — jeśli on też ma `MappingVariesByDestIP: true`
+(albo CGNAT), to **oba twarde NAT-y** = direct praktycznie niemożliwy po stronie serwera → od razu Peer Relay / płatny host.
+
+**Fixy (od najlepszego):**
+1. **Wired Ethernet + Colima bridged** → serwer za samym routerem (zwykle łatwy NAT) → true direct P2P, najniższy ping.
+   Most L2 **nie działa po WiFi** → wymaga kabla (Mac bez portu = adapter USB-C→Ethernet). Po: `netcheck` ma pokazać
+   `MappingVariesByDestIP: false`. Opcjonalnie włącz NAT-PMP na routerze. (Bridged = `colima delete`+recreate z
+   `--network-address --network-interface <eth>`, socket_vmnet, sudo; świat zbackupuj.)
+2. **Peer Relay (bez kabla)** — zaproś gracza jako **usera** (NIE share; share blokuje peer-relay), postaw prywatny
+   relay Tailscale na dobrze podłączonym sprzęcie → nie-DERP, niski ping.
+3. **Płatny host** z publicznym IP — eliminuje cały problem NAT (ale nie 0 zł).
+
+Uwaga: node-sharing samo w sobie NIE powoduje relayu (Tailscale traktuje shared == ten sam tailnet na poziomie
+danych) — winny jest symetryczny NAT. Ale sharing **blokuje** Peer Relay i subnet-routes (stąd invite-as-user dla fixu #2).

@@ -136,6 +136,18 @@ Serwer działa tylko gdy Mac jest **zalogowany** (Colima/docker w sesji użytkow
 - Pusty serwer bierze ~1 rdzeń Maca (cecha Valheima + narzut QEMU) — znika do 0 po `stop.sh`.
 - Dla ~3 casualowych graczy zapas jest spory. To **nie** serwer 24/7 — Mac musi być wybudzony i zalogowany.
 
+## Zdalni gracze: direct vs relay (ping)
+
+Gracz w **tej samej sieci** łączy się bezpośrednio (niski ping). Gracz **zdalny** może trafić na
+**relay DERP** Tailscale (wyższy ping, jitter, „ślizganie się" postaci), bo serwer w VM siedzi za
+**symetrycznym NAT-em QEMU** — to NIE wina emulacji ani łącza. Sprawdzisz:
+`docker exec valheim-ts tailscale netcheck` (`MappingVariesByDestIP: true` = symetryczny NAT) oraz
+`tailscale ping <peer>` (`via DERP` = relay, `direct` = OK).
+
+Żeby dać zdalnym **direct**: albo **Mac kablem (Ethernet) + Colima bridged** (most L2 nie działa po WiFi;
+najlepszy ping), albo **Tailscale Peer Relay** (zaproś gracza jako *usera*, nie share). Pełna diagnoza i
+fixy: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) (#14).
+
 ## Bezpieczeństwo
 
 - **Sekrety nie idą do repo:** `.env` (hasło, `TS_AUTHKEY`) jest w `.gitignore`. Commituj tylko `.env.example`.
