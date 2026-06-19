@@ -191,7 +191,9 @@ informacji z Twojego kompa. Zajmie 2 minuty. Robisz to **na komputerze, na któr
    ```
    - MappingVariesByDestIP: true   (albo false)
    ```
-5. **Bonus** (jak Ci się chce) — wklej jeszcze to i wyślij wynik (ma napisać `direct` albo `via DERP`):
+5. **Bonus** — TYLKO gdy dam Ci znać, że serwer jest włączony (inaczej trafisz w martwy węzeł
+   i wyjdą błędy — nie panikuj wtedy, po prostu poczekaj na mój sygnał). Wklej i wyślij wynik
+   (ma napisać `direct` albo `via DERP`):
    ```
    tailscale ping 100.119.242.14
    ```
