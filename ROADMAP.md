@@ -62,6 +62,59 @@ Instrukcja dla Jaśka na końcu tego pliku.
 
 ---
 
+## STAN WDROŻENIA — sesja 2026-06-21 noc (⚠️ czeka na test Jaśka)
+
+Wdrażając Opcję 1 odkryliśmy, że pierwotny pomysł („publish portów → Lima forwarduje na host")
+**nie działa**, i trzeba było złożyć pełniejszą architekturę. Co ustalono empirycznie:
+
+1. **Lima NIE forwarduje UDP.** Guest agent wykrywa porty (`added_local_ports protocol:"udp"`),
+   ale forwarder obsługuje tylko TCP → na hoście Maca nic nie nasłuchiwało na 2456/2457. Approach
+   „docker publish + auto-forward" = ślepa uliczka dla gry (UDP).
+2. **Węzeł TS wewnątrz VM jest zawsze za symetrycznym NAT-em.** Po włączeniu `colima
+   --network-address` (vmnet) netcheck Z VM dalej dał `MappingVariesByDestIP: true` (mimo że ruch
+   wychodził już publicznym IP Maca). Czyli slirp czy vmnet — bez różnicy. **Easy NAT ma TYLKO host
+   Maca** (`macbook-priv`, netcheck: `false`, PortMapping UPnP/NAT-PMP/PCP).
+3. **Działająca architektura (złożona i URUCHOMIONA):**
+   ```
+   Jasiek (easy) --direct--> Mac:2456 (host TS macbook-priv, easy NAT) --socat--> 192.168.106.2:2456 (VM) --> kontener
+   ```
+   - `colima start valheim --network-address` → VM dostaje adres vmnet `192.168.106.2` osiągalny z Maca
+     (ICMP ~2 ms). [socket_vmnet zainstalowany]
+   - compose przełączony na `docker-compose.host-ts.yml` (bez sidecara, publikuje 2456-2457/udp).
+   - `tailscale` na hoście (1.98.5) zalogowany; węzeł `macbook-priv` = `100.103.236.80`.
+   - `scripts/host-ts-bridge.sh start` → socat 2456/2457 z Maca do VM; nasłuch na `*:2456/2457`
+     (czyli też na tailnet-IP).
+
+**STATUS: zweryfikowane STRUKTURALNIE** (host nasłuchuje, VM osiągalna, serwer `Opened Steam server`).
+**NIEzweryfikowane na poziomie gry** — A2S nie odpowiada (serwer prywatny, `SERVER_PUBLIC=false`;
+timeout także bezpośrednio do VM, więc to nie wina mostka). **Jedyny prawdziwy dowód = wejście Jaśka.**
+
+### Co musi zrobić z00rd (panel Tailscale), zanim Jasiek wejdzie
+- **Share** węzła **`macbook-priv`** Jaśkowi (stary `valheim-server` jest już offline/nieużywany).
+- **Disable key expiry** dla `macbook-priv`.
+- Nowy **Join IP = `100.103.236.80:2456`** (NIE stare `100.119.242.14`).
+
+### ⚠️ Kruche punkty (do utwardzenia PO potwierdzeniu Jaśka)
+- `play.sh` startuje colima **bez** `--network-address` i czyta IP ze starego sidecara — **NIE
+  uruchamiaj teraz play.sh/stop.sh**, bo rozjedzie układ. Obecna sesja jest złożona ręcznie.
+- socat i `--network-address` nie są wpięte w skrypty (świadomie, do czasu weryfikacji). Po
+  restarcie VM: `colima start valheim --network-address ...` + `scripts/host-ts-bridge.sh start`.
+- Mac trzymany przy życiu przez `caffeinate -dimsu` (z play.sh) — zostaw włączony do testu.
+
+### Rollback (gdyby trzeba wrócić do działającego-choć-lagującego)
+```bash
+cp docker-compose.vm-ts.yml.bak docker-compose.yml   # przywróć sidecar (lokalny .bak)
+docker --context colima-valheim compose up -d         # wróci węzeł valheim-server 100.119.242.14
+scripts/host-ts-bridge.sh stop                         # ubij mostek
+```
+
+### Po potwierdzeniu Jaśka (TODO)
+- Wpiąć `--network-address` w `play.sh` (colima start) + auto-start `host-ts-bridge.sh`; w `stop.sh`
+  dodać `host-ts-bridge.sh stop`. Zmienić `ts_ip()` na host (`tailscale ip -4`). Zacommitować
+  `docker-compose.yml` = wariant host-ts. Rozważyć launchd dla socat (przeżycie reboota).
+
+---
+
 ## Opcja 1 — Tailscale na hoście Maca (REKOMENDOWANA, zacznij tu)
 
 Idea: przenieś węzeł Tailscale z VM na **sam macOS**. Wtedy węzłem tailnetu jest Mac (za easy
