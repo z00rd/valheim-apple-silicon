@@ -1,7 +1,9 @@
-# Valheim dedicated server + Tailscale sidecar.
-# Działa WEWNĄTRZ maszyny x86_64 (Colima/QEMU) — patrz scripts/setup.sh.
-# Valheim współdzieli network namespace z kontenerem Tailscale, więc serwer jest
-# widoczny pod adresem 100.x.y.z węzła Tailscale "valheim-server" — bez port-forwardingu.
+# Valheim dedicated server + Tailscale sidecar — the "simple" rollback variant.
+# Runs entirely INSIDE the x86_64 VM (Colima/QEMU). Valheim shares the network namespace with the
+# Tailscale container, so the server is reachable at the "valheim-server" node's 100.x.y.z address —
+# no port-forwarding. NOTE: a Tailscale node inside the VM is behind QEMU's symmetric NAT, so remote
+# players fall back to a DERP relay (laggy). For direct P2P use the default docker-compose.yml
+# (Tailscale on the host) — see ARCHITECTURE.md.
 
 services:
   tailscale:
@@ -14,7 +16,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:?Ustaw TS_AUTHKEY w .env (klucz z panelu Tailscale)}
+      TS_AUTHKEY: ${TS_AUTHKEY:?Set TS_AUTHKEY in .env (key from the Tailscale admin)}
       TS_HOSTNAME: ${TS_HOSTNAME:-valheim-server}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
@@ -27,32 +29,32 @@ services:
     container_name: valheim
     depends_on:
       - tailscale
-    network_mode: service:tailscale     # współdzieli sieć z kontenerem Tailscale
+    network_mode: service:tailscale     # shares the network with the Tailscale container
     restart: unless-stopped
-    stop_grace_period: 2m               # czas na zapis świata przy zatrzymaniu
+    stop_grace_period: 2m               # time to save the world on shutdown
     cap_add:
       - SYS_NICE
     security_opt:
-      - seccomp=unconfined              # zabezpieczenie pod SteamCMD (znany bug seccomp)
+      - seccomp=unconfined              # workaround for SteamCMD (known seccomp bug)
     volumes:
-      - valheim-config:/config          # świat + backupy (worlds_local, backups)
-      - valheim-server:/opt/valheim     # pliki serwera (żeby nie pobierać ponownie)
+      - valheim-config:/config          # world + backups (worlds_local, backups)
+      - valheim-server:/opt/valheim     # server files (so we don't re-download)
     environment:
-      SERVER_NAME: ${SERVER_NAME:?Ustaw SERVER_NAME w .env}
-      WORLD_NAME: ${WORLD_NAME:?Ustaw WORLD_NAME w .env}
-      SERVER_PASS: ${SERVER_PASS:?Ustaw SERVER_PASS w .env (min. 5 znaków)}
-      SERVER_PUBLIC: "false"            # serwer prywatny — tylko przez Join IP
+      SERVER_NAME: ${SERVER_NAME:?Set SERVER_NAME in .env}
+      WORLD_NAME: ${WORLD_NAME:?Set WORLD_NAME in .env}
+      SERVER_PASS: ${SERVER_PASS:?Set SERVER_PASS in .env (min. 5 chars)}
+      SERVER_PUBLIC: "false"            # private server — Join IP only
       SERVER_PORT: "2456"
       TZ: ${TZ:-Europe/Warsaw}
-      # --- automatyka (to robi "łatwe maintenance") ---
+      # --- automation (this is what makes maintenance "easy") ---
       BACKUPS: "true"
-      BACKUPS_CRON: "0 */6 * * *"       # backup co 6h
+      BACKUPS_CRON: "0 */6 * * *"       # backup every 6h
       BACKUPS_MAX_COUNT: "12"
-      BACKUPS_IF_IDLE: "false"          # nie backupuj w kółko gdy pusto
-      UPDATE_CRON: "*/15 * * * *"       # auto-update serwera Valheim co 15 min (gdy nikt nie gra)
+      BACKUPS_IF_IDLE: "false"          # don't keep backing up when empty
+      UPDATE_CRON: "*/15 * * * *"       # auto-update the Valheim server every 15 min (when nobody plays)
       UPDATE_IF_IDLE: "true"
       RESTART_IF_IDLE: "true"
-      STEAMCMD_ARGS: ""                 # bez 'validate' = szybki restart (nie re-checksumuje 1.7 GB co start)
+      STEAMCMD_ARGS: ""                 # no 'validate' = fast restart (doesn't re-checksum 1.7 GB each start)
 
 volumes:
   ts-state:

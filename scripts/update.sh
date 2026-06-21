@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Aktualizacja obrazu kontenera (nowe funkcje wrappera). Sam serwer Valheim
-# i tak auto-aktualizuje się co 15 min gdy nikt nie gra — to jest do obrazu.
+# Update the container image (new wrapper features). The Valheim server itself
+# auto-updates every 15 min when nobody is playing — this is for the image.
 source "$(dirname "$0")/lib.sh"
 need_colima; need_env
-vm_running || die "VM nie działa — odpal ./scripts/play.sh albo ./scripts/setup.sh"
-info "Pobieram najnowszy obraz i odtwarzam kontenery..."
+vm_running || die "VM is not running — run ./scripts/play.sh or ./scripts/setup.sh"
+info "Pulling the latest image and recreating the containers..."
 compose pull
 compose up -d
-c_grn "✔ Zaktualizowane."
+c_grn "✔ Updated."

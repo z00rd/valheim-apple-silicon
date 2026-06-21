@@ -1,16 +1,16 @@
-# Sekrety i dane lokalne — NIGDY do repo
+# Secrets and local data — NEVER commit
 .env
 backups/
 .caffeinate.pid
-.socat-bridge.pids
+.udp-bridge.pids
 *.log
 
-# Lokalne artefakty (PID-y mostka, kopie robocze compose, cache Pythona)
+# Local artifacts (bridge PID files, working compose copies, Python cache)
 *.bak
 __pycache__/
 *.pyc
 
-# Osobisty dziennik debugowania (zawiera prywatne IP/daty). Lekcje są w TROUBLESHOOTING.md.
+# Personal debugging journal (contains private IPs/dates). Lessons live in TROUBLESHOOTING.md.
 SETUP-LOG.md
 
 # macOS
@@ -20,5 +20,5 @@ SETUP-LOG.md
 .idea/
 .vscode/
 
-# Osobisty dziennik decyzji (prywatne IP/imiona) — local only
+# Personal decision journal (private IPs/names) — local only
 ROADMAP.md

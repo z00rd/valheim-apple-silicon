@@ -1,41 +1,45 @@
 #!/usr/bin/env bash
-# Instaluje wszystkie zależności potrzebne do postawienia serwera (przez Homebrew).
-# Uruchom raz na świeżym Macu:  ./scripts/bootstrap.sh
+# Installs every dependency needed to stand the server up (via Homebrew).
+# Run once on a fresh Mac:  ./scripts/bootstrap.sh
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 say(){ printf '\033[36m▶ %s\033[0m\n' "$*"; }
 die(){ printf '\033[31m✗ %s\033[0m\n' "$*"; exit 1; }
 
-[ "$(uname -s)" = "Darwin" ] || die "Ten skrypt jest pod macOS."
-[ "$(uname -m)" = "arm64" ] || printf '\033[33m▲ Nie arm64 — projekt celuje w Apple Silicon. Kontynuuję.\033[0m\n'
+[ "$(uname -s)" = "Darwin" ] || die "This script is for macOS."
+[ "$(uname -m)" = "arm64" ] || printf '\033[33m▲ Not arm64 — this project targets Apple Silicon. Continuing.\033[0m\n'
 
-command -v brew >/dev/null 2>&1 || die "Brak Homebrew. Zainstaluj: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"  i uruchom ponownie."
+command -v brew >/dev/null 2>&1 || die "Homebrew not found. Install: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"  then re-run."
 
-say "Instaluję narzędzia maszyny wirtualnej + emulacji x86_64"
-# colima  = VM + runtime dockera; qemu = emulacja x86_64;
-# lima-additional-guestagents = agent gościa dla x86_64 (bez tego VM x86_64 NIE wstaje)
+say "Installing VM + x86_64 emulation tooling"
+# colima = VM + docker runtime; qemu = x86_64 emulation;
+# lima-additional-guestagents = guest agent for x86_64 (without it an x86_64 VM will NOT start)
 brew install colima qemu lima-additional-guestagents
 
 if command -v docker >/dev/null 2>&1; then
-  say "docker CLI już jest ($(docker --version)) — pomijam"
+  say "docker CLI already present ($(docker --version)) — skipping"
 else
-  say "Instaluję docker CLI + plugin compose"
+  say "Installing docker CLI + compose plugin"
   brew install docker docker-compose
 fi
 
+say "Installing Tailscale (runs on the host — gives remote players a direct P2P link)"
+brew list tailscale >/dev/null 2>&1 || brew install tailscale
+
 if [ ! -f "$PROJECT_DIR/.env" ]; then
-  say "Tworzę .env z szablonu"
+  say "Creating .env from the template"
   cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
-  printf '\033[33m▲ Uzupełnij teraz %s: SERVER_PASS, TS_AUTHKEY, SERVER_NAME, WORLD_NAME\033[0m\n' "$PROJECT_DIR/.env"
+  printf '\033[33m▲ Now fill in %s: SERVER_PASS, SERVER_NAME, WORLD_NAME\033[0m\n' "$PROJECT_DIR/.env"
 fi
 
 chmod +x "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
 
-printf '\n\033[32m✔ Zależności zainstalowane.\033[0m\n'
+printf '\n\033[32m✔ Dependencies installed.\033[0m\n'
 cat <<'EOF'
-Dalej:
-  1. Uzupełnij .env  (SERVER_PASS min. 5 znaków, TS_AUTHKEY z panelu Tailscale)
-  2. ./scripts/doctor.sh     # sprawdzenie gotowości
-  3. ./scripts/setup.sh      # postawienie serwera (pierwszy raz ~15+ min)
+Next:
+  1. Fill in .env                              (SERVER_PASS min. 5 chars, SERVER_NAME, WORLD_NAME)
+  2. Set up Tailscale on the host (one-time):  sudo brew services start tailscale && tailscale up
+  3. ./scripts/doctor.sh                       # preflight check
+  4. ./scripts/setup.sh                        # provision the server (first run ~15+ min)
 EOF

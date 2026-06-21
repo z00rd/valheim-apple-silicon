@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# Import istniejącego świata (np. od kumpla) do serwera.
-# Użycie:  ./scripts/import-world.sh /ścieżka/do/Świat.db /ścieżka/do/Świat.fwl
-# Kopiuje oba pliki do serwera, ustawia WORLD_NAME w .env i przypomina o restarcie.
+# Import an existing world (e.g. from a friend) into the server.
+# Usage:  ./scripts/import-world.sh /path/to/World.db /path/to/World.fwl
+# Copies both files into the server, sets WORLD_NAME in .env and restarts.
 source "$(dirname "$0")/lib.sh"
 need_colima
 
 DB="${1:-}"; FWL="${2:-}"
 if [ ! -f "$DB" ] || [ ! -f "$FWL" ]; then
-  die "Podaj ścieżki do OBU plików świata.
-Przykład:  ./scripts/import-world.sh ~/Downloads/Midgard.db ~/Downloads/Midgard.fwl
-(Poproś kumpla o oba pliki z jego folderu worlds_local — patrz README.)"
+  die "Provide the paths to BOTH world files.
+Example:  ./scripts/import-world.sh ~/Downloads/Midgard.db ~/Downloads/Midgard.fwl
+(Ask your friend for both files from their worlds_local folder — see README.)"
 fi
 
 base_db="$(basename "$DB" .db)"
 base_fwl="$(basename "$FWL" .fwl)"
 [ "$base_db" = "$base_fwl" ] \
-  || die "Pliki muszą mieć tę samą nazwę bazową (np. Midgard.db + Midgard.fwl). Mam: '$base_db' vs '$base_fwl'."
+  || die "The files must share the same base name (e.g. Midgard.db + Midgard.fwl). Got: '$base_db' vs '$base_fwl'."
 
-vm_running || die "Najpierw odpal serwer raz: ./scripts/setup.sh (utworzy wolumen na świat)."
-docker ps --format '{{.Names}}' | grep -q '^valheim$' || die "Kontener 'valheim' nie działa. Odpal ./scripts/play.sh i spróbuj ponownie."
+vm_running || die "Run the server once first: ./scripts/setup.sh (creates the world volume)."
+docker ps --format '{{.Names}}' | grep -q '^valheim$' || die "The 'valheim' container is not running. Run ./scripts/play.sh and try again."
 
-info "Kopiuję świat '$base_db' do serwera..."
+info "Copying world '$base_db' into the server..."
 docker exec valheim mkdir -p /config/worlds_local
 docker cp "$DB"  "valheim:/config/worlds_local/$base_db.db"
 docker cp "$FWL" "valheim:/config/worlds_local/$base_db.fwl"
 
-# Ustaw WORLD_NAME w .env (macOS sed)
+# Set WORLD_NAME in .env
 if [ -f "$ENV_FILE" ]; then
-  # usuń istniejącą linię WORLD_NAME i dopisz nową DOSŁOWNIE (bezpieczne dla każdej nazwy: &, /, ...)
+  # remove any existing WORLD_NAME line and append a new one VERBATIM (safe for any name: &, /, ...)
   grep -v '^WORLD_NAME=' "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
   printf 'WORLD_NAME="%s"\n' "$base_db" >> "$ENV_FILE"
-  c_grn "✔ Ustawiłem WORLD_NAME=\"$base_db\" w .env"
+  c_grn "✔ Set WORLD_NAME=\"$base_db\" in .env"
 fi
 
-info "Restartuję serwer na zaimportowanym świecie..."
+info "Restarting the server on the imported world..."
 compose up -d --force-recreate valheim
-c_grn "✔ Gotowe. Serwer wczytuje świat '$base_db'. Sprawdź ./scripts/logs.sh"
+c_grn "✔ Done. The server is loading world '$base_db'. Check ./scripts/logs.sh"

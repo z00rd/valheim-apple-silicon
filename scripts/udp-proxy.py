@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Wieloklientowy proxy UDP: 0.0.0.0:PORT  ->  TARGET_IP:PORT.
+"""Multi-client UDP proxy: 0.0.0.0:PORT  ->  TARGET_IP:PORT.
 
-Zastępuje socat (którego 'UDP-LISTEN,fork' sypie demux przy >1 równoczesnym kliencie).
-Trzyma osobny socket upstream per-klient, więc odpowiedzi z VM wracają do właściwego gracza.
-Bez zależności (czysty stdlib). Jeden proces na port.
+Replaces socat (whose 'UDP-LISTEN,fork' mangles demultiplexing with more than one concurrent
+client). Keeps a separate upstream socket per client, so replies from the VM go back to the right
+player. No dependencies (pure stdlib). One process per port.
 
-Uzycie: udp-proxy.py <listen_port> <target_ip> [target_port=listen_port] [idle_sec=180]
+Usage: udp-proxy.py <listen_port> <target_ip> [target_port=listen_port] [idle_sec=180]
 """
 import socket, select, sys, time
 
 def main():
     if len(sys.argv) < 3:
-        print("uzycie: udp-proxy.py <listen_port> <target_ip> [target_port] [idle_sec]", file=sys.stderr)
+        print("usage: udp-proxy.py <listen_port> <target_ip> [target_port] [idle_sec]", file=sys.stderr)
         sys.exit(2)
     lport = int(sys.argv[1])
     tip = sys.argv[2]
@@ -55,7 +55,7 @@ def main():
                     lsock.sendto(data, caddr)
                     ent = clients.get(caddr)
                     if ent: ent[1] = now
-        # sprzątanie bezczynnych klientów
+        # reap idle clients
         for caddr, ent in list(clients.items()):
             if now - ent[1] > idle:
                 up = ent[0]

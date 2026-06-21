@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Szybki przegląd: czy VM działa, czy kontenery żyją, adres Tailscale, czy serwer nasłuchuje.
+# Quick overview: is the VM up, are the containers alive, the Tailscale address, is the server ready.
 source "$(dirname "$0")/lib.sh"
 need_colima
 
 echo "── VM (Colima '$PROFILE') ──"
-colima status "$PROFILE" 2>&1 | sed 's/^/  /' || echo "  (nie działa)"
+colima status "$PROFILE" 2>&1 | sed 's/^/  /' || echo "  (not running)"
 
 if vm_running; then
-  echo; echo "── Kontenery ──"
+  echo; echo "── Containers ──"
   compose ps 2>/dev/null | sed 's/^/  /' || true
 
-  echo; echo "── Tailscale ──"
+  echo; echo "── Tailscale (host) ──"
   IP="$(ts_ip)"
-  echo "  Adres serwera (Join IP):  ${IP:-?}:2456"
-  docker exec valheim-ts tailscale status 2>/dev/null | head -10 | sed 's/^/  /' || echo "  (kontener tailscale nie działa)"
+  echo "  Server address (Join IP):  ${IP:-?}:2456"
+  tailscale status 2>/dev/null | head -10 | sed 's/^/  /' || echo "  (tailscale not running on the host)"
 
-  echo; echo "── Serwer Valheim ──"
+  echo; echo "── Valheim server ──"
   if compose logs --tail=400 valheim 2>/dev/null | grep -qE "Opened Steam server|Connections [0-9]"; then
-    c_grn "  ✔ Serwer gotowy (Opened Steam server / heartbeat)"
+    c_grn "  ✔ Server ready (Opened Steam server / heartbeat)"
   else
-    c_ylw "  ⚠ Serwer jeszcze wstaje (pierwszy świat się generuje?) — zobacz ./scripts/logs.sh"
+    c_ylw "  ⚠ Server still starting (first world generating?) — see ./scripts/logs.sh"
   fi
 fi
