@@ -6,6 +6,9 @@ Wszystko oskryptowane: jedna komenda start, jedna stop.
 
 > Stan: **działa**, przetestowane na MacBooku Pro M1 / macOS 26. Dla 3 graczy spokojnie wystarcza.
 
+> 📐 **Jak to działa pod spodem — warstwy abstrakcji i droga pakietu (diagramy):**
+> **[ARCHITECTURE.md](ARCHITECTURE.md)**
+
 ---
 
 ## Dlaczego tak (architektura)
@@ -14,20 +17,25 @@ Dedykowany serwer Valheim istnieje **wyłącznie jako binarka x86_64** (Linux/Wi
 na ARM ani na macOS. Na Apple Silicon trzeba go więc emulować. Sprawdzone, stabilne podejście:
 
 ```
-[Mac M1] → [VM x86_64, pełny QEMU (Colima)] → Docker:
-                                                ├─ tailscale  (węzeł "valheim-server", IP 100.x)
-                                                └─ valheim    (lloesche/valheim-server, sieć współdzielona z tailscale)
+[Mac arm64]  za EASY NAT routera
+  ├─ tailscaled (węzeł 100.x)   ── easy NAT → DIRECT P2P do graczy
+  ├─ udp-proxy.py  *:2456-2457  ──► przerzut do VM
+  └─ [VM x86_64, pełny QEMU (Colima/Lima)]
+        └─ Docker → kontener valheim  (Steam UDP 2456/2457)
 
-  znajomy z Tailscale ──WireGuard──▶ 100.x.y.z : 2456
+  znajomy z Tailscale ──WireGuard (direct)──▶ 100.x.y.z : 2456
 ```
 
 - **Colima + pełny QEMU**, nie Docker Desktop + Rosetta — Rosetta crashuje silnik mono/Unity tego
   serwera. Pełny QEMU jest wolniejszy, ale działa stabilnie.
-- **Sidecar Tailscale** — serwer współdzieli sieć z kontenerem Tailscale (`network_mode: service:tailscale`),
-  więc jest widoczny pod adresem `100.x` węzła. **Nie publikujemy żadnych portów na hosta** → omija to
-  buga UDP w Docker Desktop na macOS i nie wymaga port-forwardingu na routerze.
+- **Tailscale na HOŚCIE Maca (nie w VM)** — tylko host jest za **easy NAT**, więc zdalny gracz dostaje
+  **direct P2P**, a nie relay DERP (to było źródło lagów). Ruch do kontenera dokłada most
+  `udp-proxy.py` (host ⇄ vmnet ⇄ VM). Prosty wariant ze starym sidecarem w VM (laggy dla zdalnych)
+  zostaje jako rollback w `docker-compose.sidecar.yml`.
 - **Obraz** [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker) — daje
   auto-update serwera, cykliczne backupy świata i opcjonalne mody „z pudełka".
+
+> 📐 Pełne diagramy warstw i cyklu połączenia: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ## Wymagania
 
@@ -136,17 +144,16 @@ Serwer działa tylko gdy Mac jest **zalogowany** (Colima/docker w sesji użytkow
 - Pusty serwer bierze ~1 rdzeń Maca (cecha Valheima + narzut QEMU) — znika do 0 po `stop.sh`.
 - Dla ~3 casualowych graczy zapas jest spory. To **nie** serwer 24/7 — Mac musi być wybudzony i zalogowany.
 
-## Zdalni gracze: direct vs relay (ping)
+## Zdalni gracze: direct (rozwiązane)
 
-Gracz w **tej samej sieci** łączy się bezpośrednio (niski ping). Gracz **zdalny** może trafić na
-**relay DERP** Tailscale (wyższy ping, jitter, „ślizganie się" postaci), bo serwer w VM siedzi za
-**symetrycznym NAT-em QEMU** — to NIE wina emulacji ani łącza. Sprawdzisz:
-`docker exec valheim-ts tailscale netcheck` (`MappingVariesByDestIP: true` = symetryczny NAT) oraz
-`tailscale ping <peer>` (`via DERP` = relay, `direct` = OK).
+Zdalny gracz gra **płynnie (direct P2P)** dzięki temu, że węzeł Tailscale stoi **na hoście Maca**
+(easy NAT), a nie w VM. Gdyby węzeł siedział w VM, trafiałby za **symetryczny NAT QEMU** → relay
+DERP → jitter i „ślizganie" postaci (to NIE wina emulacji ani łącza). Sprawdzenie u gracza:
+`tailscale ping <adres-serwera>` → ma pokazać **`direct`**, nie `via DERP`.
 
-Żeby dać zdalnym **direct**: albo **Mac kablem (Ethernet) + Colima bridged** (most L2 nie działa po WiFi;
-najlepszy ping), albo **Tailscale Peer Relay** (zaproś gracza jako *usera*, nie share). Pełna diagnoza i
-fixy: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) (#14).
+Jak to spięte (host-TS + vmnet + `udp-proxy.py`) i dlaczego akurat tak — z diagramami:
+**[ARCHITECTURE.md](ARCHITECTURE.md)**. Historia decyzji i odrzucone warianty (kabel/bridged, Peer
+Relay, płatny host): [ROADMAP.md](ROADMAP.md). Realne pułapki: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) (#14).
 
 ## Bezpieczeństwo
 
