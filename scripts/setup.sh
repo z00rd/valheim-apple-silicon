@@ -31,6 +31,15 @@ for _ in $(seq 1 90); do
 done
 echo
 
+# Start the host->VM UDP bridge so the server is reachable on the tailnet right away
+# (same bridge that play.sh manages). Needs Tailscale running on the host.
+if tailscale status >/dev/null 2>&1; then
+  "$(dirname "$0")/host-ts-bridge.sh" start || c_ylw "UDP bridge didn't start — diagnose: ./scripts/host-ts-bridge.sh status"
+else
+  c_ylw "Tailscale is not running on the HOST — run once:  sudo brew services start tailscale && tailscale up"
+  c_ylw "(needed so remote players reach the server; then re-run ./scripts/play.sh)"
+fi
+
 IP="$(ts_ip)"
 echo
 if [ "$ok" = "1" ]; then c_grn "================== DONE =================="; else c_ylw "===== Server still starting (check the logs) ====="; fi
@@ -40,4 +49,5 @@ echo "  Status:                                  ./scripts/status.sh"
 echo "  Logs:                                    ./scripts/logs.sh"
 echo "  Import a world:                          ./scripts/import-world.sh <world>.db <world>.fwl"
 c_grn "=========================================="
+echo "For day-to-day sessions use:  ./scripts/play.sh  (start)  ·  ./scripts/stop.sh  (end)"
 [ "$ok" = "1" ] || c_ylw "If it's still not ready after a few minutes — check ./scripts/logs.sh"
