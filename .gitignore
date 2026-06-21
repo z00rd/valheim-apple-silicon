@@ -2,7 +2,13 @@
 .env
 backups/
 .caffeinate.pid
+.socat-bridge.pids
 *.log
+
+# Lokalne artefakty (PID-y mostka, kopie robocze compose, cache Pythona)
+*.bak
+__pycache__/
+*.pyc
 
 # Osobisty dziennik debugowania (zawiera prywatne IP/daty). Lekcje są w TROUBLESHOOTING.md.
 SETUP-LOG.md
