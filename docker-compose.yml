@@ -1,39 +1,28 @@
-# Valheim dedicated server + Tailscale sidecar.
-# Działa WEWNĄTRZ maszyny x86_64 (Colima/QEMU) — patrz scripts/setup.sh.
-# Valheim współdzieli network namespace z kontenerem Tailscale, więc serwer jest
-# widoczny pod adresem 100.x.y.z węzła Tailscale "valheim-server" — bez port-forwardingu.
+# DOCELOWY compose dla Opcji 1 (Tailscale na HOŚCIE Maca, NIE w VM).
+# Patrz ROADMAP.md → "Opcja 1". Cutover: zatrzymaj stack na starym compose, podmień plik,
+# podnieś. Węzłem tailnetu staje się sam Mac (easy NAT ASUS) → direct P2P do Jaśka.
+#
+# RÓŻNICE vs docker-compose.yml:
+#  - usunięty sidecar `tailscale` (węzeł TS przenosi się na host macOS),
+#  - valheim NIE współdzieli już netns; publikuje porty UDP, które Colima forwarduje na host,
+#  - Tailscale na hoście serwuje te porty pod adresem 100.x Maca (subnet-route jako fallback).
+#
+# UWAGA (jedyne ryzyko): forward UDP przez Lima/Colima. Jeśli gra nie łapie połączenia mimo
+# `direct` w `tailscale ping` → fallback subnet-route (ROADMAP.md, sekcja "Ryzyko / fallback").
 
 services:
-  tailscale:
-    image: tailscale/tailscale:latest
-    container_name: valheim-ts
-    hostname: ${TS_HOSTNAME:-valheim-server}
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:?Ustaw TS_AUTHKEY w .env (klucz z panelu Tailscale)}
-      TS_HOSTNAME: ${TS_HOSTNAME:-valheim-server}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"
-      TS_EXTRA_ARGS: --accept-dns=false
-    volumes:
-      - ts-state:/var/lib/tailscale
-
   valheim:
     image: ghcr.io/lloesche/valheim-server:latest
     container_name: valheim
-    depends_on:
-      - tailscale
-    network_mode: service:tailscale     # współdzieli sieć z kontenerem Tailscale
     restart: unless-stopped
     stop_grace_period: 2m               # czas na zapis świata przy zatrzymaniu
     cap_add:
       - SYS_NICE
     security_opt:
-      - seccomp=unconfined              # zabezpieczenie pod SteamCMD (znany bug seccomp)
+      - seccomp=unconfined              # known SteamCMD seccomp bug
+    ports:
+      - "2456:2456/udp"                 # gra
+      - "2457:2457/udp"                 # Steam query / A2S
     volumes:
       - valheim-config:/config          # świat + backupy (worlds_local, backups)
       - valheim-server:/opt/valheim     # pliki serwera (żeby nie pobierać ponownie)
@@ -41,20 +30,18 @@ services:
       SERVER_NAME: ${SERVER_NAME:?Ustaw SERVER_NAME w .env}
       WORLD_NAME: ${WORLD_NAME:?Ustaw WORLD_NAME w .env}
       SERVER_PASS: ${SERVER_PASS:?Ustaw SERVER_PASS w .env (min. 5 znaków)}
-      SERVER_PUBLIC: "false"            # serwer prywatny — tylko przez Join IP
+      SERVER_PUBLIC: "false"
       SERVER_PORT: "2456"
       TZ: ${TZ:-Europe/Warsaw}
-      # --- automatyka (to robi "łatwe maintenance") ---
       BACKUPS: "true"
-      BACKUPS_CRON: "0 */6 * * *"       # backup co 6h
+      BACKUPS_CRON: "0 */6 * * *"
       BACKUPS_MAX_COUNT: "12"
-      BACKUPS_IF_IDLE: "false"          # nie backupuj w kółko gdy pusto
-      UPDATE_CRON: "*/15 * * * *"       # auto-update serwera Valheim co 15 min (gdy nikt nie gra)
+      BACKUPS_IF_IDLE: "false"
+      UPDATE_CRON: "*/15 * * * *"
       UPDATE_IF_IDLE: "true"
       RESTART_IF_IDLE: "true"
-      STEAMCMD_ARGS: ""                 # bez 'validate' = szybki restart (nie re-checksumuje 1.7 GB co start)
+      STEAMCMD_ARGS: ""                 # bez 'validate' = szybki restart
 
 volumes:
-  ts-state:
   valheim-config:
   valheim-server:

@@ -3,6 +3,9 @@
 source "$(dirname "$0")/lib.sh"
 need_colima
 
+info "Zatrzymuję most UDP (proxy host->VM)..."
+"$(dirname "$0")/host-ts-bridge.sh" stop || true
+
 if vm_running; then
   info "Backup świata przed zamknięciem..."
   "$(dirname "$0")/backup.sh" || c_ylw "Backup nie wyszedł — pomijam."

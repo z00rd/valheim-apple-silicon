@@ -21,8 +21,10 @@ PID_FILE="$PID_DIR/.socat-bridge.pids"
 
 vm_ip() { colima list 2>/dev/null | awk -v p="$PROFILE" '$1==p {print $NF}'; }
 
+PROXY="$PID_DIR/scripts/udp-proxy.py"
+
 start() {
-  command -v socat >/dev/null || { echo "Brak socat. brew install socat"; exit 1; }
+  command -v python3 >/dev/null || { echo "Brak python3."; exit 1; }
   local ip; ip="$(vm_ip)"
   [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
     echo "VM nie ma adresu vmnet (kolumna ADDRESS w 'colima list' pusta)."
@@ -30,9 +32,11 @@ start() {
   stop
   : > "$PID_FILE"
   for port in "${PORTS[@]}"; do
-    nohup socat -T600 "UDP4-LISTEN:${port},fork,reuseaddr" "UDP4:${ip}:${port}" >/dev/null 2>&1 &
+    # Wieloklientowe proxy UDP (udp-proxy.py) — socat 'UDP-LISTEN,fork' sypał demux przy >1 graczu.
+    # Listener żyje cały czas (brak timeoutu bezczynności).
+    nohup python3 "$PROXY" "$port" "$ip" "$port" >/dev/null 2>&1 &
     echo $! >> "$PID_FILE"
-    echo "socat ${port} -> ${ip}:${port}  (pid $!)"
+    echo "proxy ${port} -> ${ip}:${port}  (pid $!)"
   done
   echo "Most gotowy. Join IP (NOWY) = $(tailscale ip -4 2>/dev/null | head -1):2456"
 }
@@ -42,11 +46,12 @@ stop() {
     while read -r pid; do [ -n "$pid" ] && kill "$pid" 2>/dev/null || true; done < "$PID_FILE"
     rm -f "$PID_FILE"
   fi
-  pkill -f "socat .*UDP4-LISTEN:(2456|2457)" 2>/dev/null || true
+  pkill -f "udp-proxy.py" 2>/dev/null || true
+  pkill -f "socat .*UDP4-LISTEN:(2456|2457)" 2>/dev/null || true   # sprzątnij stary socat, gdyby został
 }
 
 status() {
-  pgrep -fl "socat .*UDP4-LISTEN" || echo "brak socat"
+  pgrep -fl "udp-proxy.py" || echo "brak proxy"
   echo "VM IP: $(vm_ip)   host TS IP: $(tailscale ip -4 2>/dev/null | head -1)"
 }
 

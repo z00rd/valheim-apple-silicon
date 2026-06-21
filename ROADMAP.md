@@ -62,56 +62,54 @@ Instrukcja dla Jaśka na końcu tego pliku.
 
 ---
 
-## STAN WDROŻENIA — sesja 2026-06-21 noc (⚠️ czeka na test Jaśka)
+## STAN WDROŻENIA — Opcja 1 ✅ DZIAŁA I POTWIERDZONE (2026-06-21 noc)
 
-Wdrażając Opcję 1 odkryliśmy, że pierwotny pomysł („publish portów → Lima forwarduje na host")
-**nie działa**, i trzeba było złożyć pełniejszą architekturę. Co ustalono empirycznie:
+**POTWIERDZONE END-TO-END:** z00rd (`megalodon`, LAN) **i Jasiek (zdalnie, direct 11 ms)** grali
+**równocześnie i płynnie**. Lag zdalnego gracza rozwiązany. Architektura utwardzona w skryptach.
+
+Droga do tego (odkrycia empiryczne — zostawione jako wiedza):
 
 1. **Lima NIE forwarduje UDP.** Guest agent wykrywa porty (`added_local_ports protocol:"udp"`),
-   ale forwarder obsługuje tylko TCP → na hoście Maca nic nie nasłuchiwało na 2456/2457. Approach
-   „docker publish + auto-forward" = ślepa uliczka dla gry (UDP).
-2. **Węzeł TS wewnątrz VM jest zawsze za symetrycznym NAT-em.** Po włączeniu `colima
-   --network-address` (vmnet) netcheck Z VM dalej dał `MappingVariesByDestIP: true` (mimo że ruch
-   wychodził już publicznym IP Maca). Czyli slirp czy vmnet — bez różnicy. **Easy NAT ma TYLKO host
-   Maca** (`macbook-priv`, netcheck: `false`, PortMapping UPnP/NAT-PMP/PCP).
-3. **Działająca architektura (złożona i URUCHOMIONA):**
-   ```
-   Jasiek (easy) --direct--> Mac:2456 (host TS macbook-priv, easy NAT) --socat--> 192.168.106.2:2456 (VM) --> kontener
-   ```
-   - `colima start valheim --network-address` → VM dostaje adres vmnet `192.168.106.2` osiągalny z Maca
-     (ICMP ~2 ms). [socket_vmnet zainstalowany]
-   - compose przełączony na `docker-compose.host-ts.yml` (bez sidecara, publikuje 2456-2457/udp).
-   - `tailscale` na hoście (1.98.5) zalogowany; węzeł `macbook-priv` = `100.103.236.80`.
-   - `scripts/host-ts-bridge.sh start` → socat 2456/2457 z Maca do VM; nasłuch na `*:2456/2457`
-     (czyli też na tailnet-IP).
+   ale forwarder obsługuje tylko TCP → „docker publish + auto-forward" = ślepa uliczka dla gry.
+2. **Węzeł TS wewnątrz VM jest zawsze za symetrycznym NAT-em.** Po `colima --network-address`
+   (vmnet) netcheck Z VM dalej dał `MappingVariesByDestIP: true`. slirp czy vmnet — bez różnicy.
+   **Easy NAT ma TYLKO host Maca** (`macbook-priv`, netcheck `false`, PortMapping UPnP/NAT-PMP/PCP).
+3. **socat to ślepa uliczka dla multi-klienta.** `socat UDP-LISTEN,fork` sypał demux przy >1
+   równoczesnym graczu (każdy alone wchodził, razem jeden wypadał) + `-T` ubijał listener po 10 min
+   ciszy. Zastąpiony własnym **`scripts/udp-proxy.py`** (per-klient mapowanie, N graczy, bez timeoutu).
 
-**STATUS: zweryfikowane STRUKTURALNIE** (host nasłuchuje, VM osiągalna, serwer `Opened Steam server`).
-**NIEzweryfikowane na poziomie gry** — A2S nie odpowiada (serwer prywatny, `SERVER_PUBLIC=false`;
-timeout także bezpośrednio do VM, więc to nie wina mostka). **Jedyny prawdziwy dowód = wejście Jaśka.**
+**Działająca architektura:**
+```
+Jasiek (easy NAT) --direct--> Mac:2456 (host TS macbook-priv, easy NAT) --udp-proxy.py--> 192.168.106.2:2456 (VM) --> kontener
+```
+- `colima start valheim --network-address` → VM = `192.168.106.2`, osiągalne z Maca (ICMP ~2 ms).
+- compose = host-ts (bez sidecara, publikuje 2456-2457/udp). [`docker-compose.yml`]
+- `tailscale` na HOŚCIE (1.98.5), węzeł `macbook-priv` = **`100.103.236.80`** ← NOWY Join IP.
+- `scripts/host-ts-bridge.sh` → `udp-proxy.py` 2456/2457 Mac→VM (nasłuch `*:` = też tailnet-IP).
 
-### Co musi zrobić z00rd (panel Tailscale), zanim Jasiek wejdzie
-- **Share** węzła **`macbook-priv`** Jaśkowi (stary `valheim-server` jest już offline/nieużywany).
-- **Disable key expiry** dla `macbook-priv`.
-- Nowy **Join IP = `100.103.236.80:2456`** (NIE stare `100.119.242.14`).
+### Utwardzone w skryptach (ZROBIONE 2026-06-21)
+- `play.sh`: `colima start … --network-address` + auto-start `host-ts-bridge.sh` (z czujnikiem,
+  czy host-TS żyje).
+- `stop.sh`: `host-ts-bridge.sh stop`.
+- `lib.sh`: `ts_ip()` czyta z hosta; `TS_AUTHKEY` już niewymagany (TS na hoście).
+- Nowy Join IP `100.103.236.80:2456` leci automatycznie z `play.sh`.
 
-### ⚠️ Kruche punkty (do utwardzenia PO potwierdzeniu Jaśka)
-- `play.sh` startuje colima **bez** `--network-address` i czyta IP ze starego sidecara — **NIE
-  uruchamiaj teraz play.sh/stop.sh**, bo rozjedzie układ. Obecna sesja jest złożona ręcznie.
-- socat i `--network-address` nie są wpięte w skrypty (świadomie, do czasu weryfikacji). Po
-  restarcie VM: `colima start valheim --network-address ...` + `scripts/host-ts-bridge.sh start`.
-- Mac trzymany przy życiu przez `caffeinate -dimsu` (z play.sh) — zostaw włączony do testu.
+### Co musi (raz) zrobić z00rd w panelu Tailscale
+- **Share** węzła **`macbook-priv`** Jaśkowi + **Disable key expiry**. ✅ (zrobione w trakcie testu)
+- Reszta graczy: Share `macbook-priv` (stary `valheim-server` nieużywany).
 
-### Rollback (gdyby trzeba wrócić do działającego-choć-lagującego)
+### Rollback (gdyby kiedyś wrócić do działającego-choć-lagującego sidecara)
 ```bash
-cp docker-compose.vm-ts.yml.bak docker-compose.yml   # przywróć sidecar (lokalny .bak)
-docker --context colima-valheim compose up -d         # wróci węzeł valheim-server 100.119.242.14
-scripts/host-ts-bridge.sh stop                         # ubij mostek
+cp docker-compose.sidecar.yml docker-compose.yml      # przywróć wariant z sidecarem w VM
+scripts/host-ts-bridge.sh stop                         # ubij proxy
+docker --context colima-valheim compose up -d          # wróci węzeł valheim-server 100.119.242.14
+# (uwaga: sidecar = powrót symetrycznego NAT-u → lag zdalnego gracza wraca)
 ```
 
-### Po potwierdzeniu Jaśka (TODO)
-- Wpiąć `--network-address` w `play.sh` (colima start) + auto-start `host-ts-bridge.sh`; w `stop.sh`
-  dodać `host-ts-bridge.sh stop`. Zmienić `ts_ip()` na host (`tailscale ip -4`). Zacommitować
-  `docker-compose.yml` = wariant host-ts. Rozważyć launchd dla socat (przeżycie reboota).
+### Otwarte (drobne, nie blokuje grania)
+- socat/proxy nie przeżyje reboota Maca jako usługa — `play.sh` i tak go wstaje na starcie sesji.
+  Jeśli kiedyś serwer ma chodzić 24/7 bez `play.sh` → launchd dla `udp-proxy.py`.
+- IP VM `192.168.106.2` jest wykrywane dynamicznie (`colima list`), więc zmiana adresu nie boli.
 
 ---
 

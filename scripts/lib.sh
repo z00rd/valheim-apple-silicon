@@ -39,11 +39,12 @@ need_env() {
   set -a; source "$ENV_FILE"; set +a
   [ "${SERVER_PASS:-}" != "" ] && [ "${SERVER_PASS:-}" != "ZMIEN_MNIE_min5znakow" ] \
     || die "Ustaw prawdziwe SERVER_PASS w .env (min. 5 znaków)."
-  [ "${TS_AUTHKEY:-}" != "" ] && [ "${TS_AUTHKEY:-}" != "tskey-auth-WKLEJ-TUTAJ" ] \
-    || die "Ustaw prawdziwy TS_AUTHKEY w .env (klucz z panelu Tailscale)."
+  # TS_AUTHKEY już NIEwymagany: od Opcji 1 Tailscale biegnie na HOŚCIE (jednorazowe `tailscale up`),
+  # nie w kontenerze w VM. Patrz ROADMAP.md "Opcja 1".
 }
 
 vm_running() { colima status "$PROFILE" >/dev/null 2>&1; }   # exit code Colimy jest miarodajny (grep 'running' łapał też 'is not running')
 
-# Adres Tailscale węzła z serwerem (czyta z kontenera tailscale)
-ts_ip() { docker exec valheim-ts tailscale ip -4 2>/dev/null | head -1 || true; }
+# Adres Tailscale węzła z serwerem = HOST Maca (węzeł macbook-priv). Od Opcji 1 Tailscale
+# biegnie na hoście, nie w VM (tylko host ma easy NAT → direct P2P). Patrz ROADMAP.md.
+ts_ip() { tailscale ip -4 2>/dev/null | head -1 || true; }
