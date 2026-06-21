@@ -36,17 +36,29 @@ NAT-em** — siedzi za routerem ASUS (easy NAT, NAT-PMP). To kluczowa obserwacja
 
 ---
 
-## GATE — najpierw `netcheck` Jaśka (poniedziałek)
+## GATE — `netcheck` Jaśka → ✅ ZALICZONY (2026-06-21)
 
-Wszystko zależy od NAT-u Jaśka. Direct P2P wymaga easy NAT po **obu** stronach.
+Wszystko zależało od NAT-u Jaśka. Direct P2P wymaga easy NAT po **obu** stronach.
 
 - Jasiek `MappingVariesByDestIP=false` (easy) → **idź w Opcję 1** (i ewentualnie 2).
 - Jasiek `true` / CGNAT (twardy NAT) → direct praktycznie niemożliwy niezależnie od naszej
   strony → przeskocz do **Opcji 3** (Peer Relay) lub docelowo **5** (płatny host).
 
+**WYNIK (zrzut z `tailscale netcheck` Jaśka, 2026-06-21 16:19):**
+- `MappingVariesByDestIP: false` → **easy NAT** ✅
+- `UDP: true`, IPv4 publiczne `91.201.44.197`, nearest DERP Warszawa 14,5 ms
+- `PortMapping:` puste (brak UPnP/NAT-PMP u Jaśka) — **nieblokujące**: przy easy NAT direct idzie
+  przez STUN/hole-punching, mapowanie portów tylko by pomogło.
+
+**DECYZJA: scenariusz „oba twarde NAT-y" odpada. Jedyny twardy NAT w układzie to nasz
+(symetryczny slirp QEMU, bo węzeł TS siedzi w VM). → Wybrana Opcja 1 (TS na hoście Maca).**
+Mac za easy NAT ASUS-a + Jasiek easy NAT → po przeniesieniu węzła na hosta `tailscale ping`
+powinien dać `direct`, lag znika, 0 zł, bez kabla. Opcje 2/3/5 = fallbacki, gdyby 1 nie zadziałała
+(jedyne realne ryzyko: forward UDP przez Lima/Colima).
+
 Instrukcja dla Jaśka na końcu tego pliku.
 
-> Rada: **nie kupuj adaptera Ethernet** (Opcja 2), dopóki netcheck Jaśka nie pokaże `false`.
+> Adapter Ethernet (Opcja 2) NIEpotrzebny — netcheck Jaśka dał `false`.
 
 ---
 
@@ -56,42 +68,47 @@ Idea: przenieś węzeł Tailscale z VM na **sam macOS**. Wtedy węzłem tailnetu
 NAT ASUS-a), a do kontenera w VM idzie tylko lokalny forward UDP. Mac easy NAT → direct do Jaśka,
 **bez kabla, bez relayu, 0 zł**.
 
-### Kroki
+### Kroki (cutover)
 
-1. **Backup świata** (zawsze przed zmianami):
+0. ✅ ZROBIONE: Tailscale CLI na hoście (`brew install tailscale`, 1.98.5) + gotowy
+   `docker-compose.host-ts.yml`.
+1. **Podnieś serwer i zrób backup świata** (zawsze przed zmianami):
    ```bash
-   ./scripts/play.sh        # podnieś, jeśli stoi
+   ./scripts/play.sh        # podnieś VM (jak stoi)
    ./scripts/backup.sh
    ```
-2. **Zainstaluj Tailscale na macOS** (nie w kontenerze!) — app z Mac App Store / strony Tailscale
-   albo CLI:
+2. **[ROBI z00rd — sudo + przeglądarka] Uruchom Tailscale na hoście i zaloguj:**
    ```bash
-   brew install tailscale
-   sudo brew services start tailscale     # uruchamia tailscaled na hoście
-   tailscale up                            # zaloguj, węzeł = ten Mac
+   sudo brew services start tailscale     # startuje tailscaled na macOS (hasło sudo)
+   tailscale up                            # otworzy przeglądarkę → zaloguj; węzeł = ten Mac
    ```
-3. **Zdejmij sidecar TS z compose**, opublikuj porty z kontenera valheim. W `docker-compose.yml`:
-   - usuń serwis `tailscale` oraz z serwisu `valheim` linię `network_mode: service:tailscale`
-     i `depends_on: [tailscale]`,
-   - dodaj do `valheim`:
-     ```yaml
-     ports:
-       - "2456:2456/udp"
-       - "2457:2457/udp"
-     ```
-   (Colima forwarduje publikowane porty kontenera na host Maca.)
-4. **Restart stacku:**
+   (Z poziomu czatu odpal z prefiksem `! ` żeby output wpadł do sesji.)
+3. **Podmień compose na wariant host-TS** (działający plik zostaje w repo jako backup):
    ```bash
+   cp docker-compose.yml docker-compose.vm-ts.yml.bak   # zachowaj stary układ
+   cp docker-compose.host-ts.yml docker-compose.yml
+   ```
+4. **Restart stacku** (zatrzyma stary sidecar, podniesie valheim z publikacją portów):
+   ```bash
+   docker --context colima-valheim compose down
    docker --context colima-valheim compose up -d
    ```
-5. **Weryfikacja (na Macu):**
+5. **TEST UDP-forward (kluczowy — to jedyne ryzyko):** sprawdź, że port serwera jest słyszalny
+   na hoście Maca:
    ```bash
-   tailscale netcheck        # CEL: MappingVariesByDestIP: false  + PortMapping niepuste
-   tailscale ip -4           # nowy adres serwera = adres TEGO Maca w tailnecie
+   nc -u -z -w2 127.0.0.1 2456 && echo "UDP 2456 OK na hoście" || echo "BRAK forwardu UDP → fallback"
+   ```
+   (Albo po prostu spróbuj wejść do gry — patrz krok 7.)
+6. **Weryfikacja sieci (na Macu):**
+   ```bash
+   tailscale netcheck        # MappingVariesByDestIP: false (Mac za easy NAT — spodziewane)
+   tailscale ip -4           # NOWY adres serwera = adres TEGO Maca w tailnecie
    tailscale ping <ip-jaśka> # CEL: "direct", nie "via DERP"
    ```
-6. **Zaktualizuj „Join IP" u graczy** — adres zmienia się z `100.119.242.14` (stary węzeł VM)
-   na adres Maca. Udostępnij węzeł Maca znajomym (Share) i w panelu **Disable key expiry**.
+7. **Daj Jaśkowi sygnał** → niech wejdzie na NOWY adres `:2456` i zrobi `tailscale ping`.
+   Udostępnij węzeł Maca (Share) + **Disable key expiry** w panelu.
+8. **Jak gra nie łapie mimo `direct`** → forward UDP nie działa → fallback subnet-route (niżej).
+   Wtedy wróć starym compose: `cp docker-compose.vm-ts.yml.bak docker-compose.yml && compose up -d`.
 
 ### Ryzyko / rzecz do sprawdzenia
 - **Forward UDP przez Colima/Lima** bywa zawodny (historycznie nastawiony na TCP). Jeśli po
@@ -161,11 +178,15 @@ Publiczny IP eliminuje cały problem NAT. Świat w zipie gotowy do migracji. Kos
 - **Host-independence:** każdy ma móc wbić sam, serwer niezależny od tego kto online.
 - **Deadline:** dodatek „Deep North" (~sierpień 2026). Jak do wtedy zdalny lag nierozwiązany → Opcja 5.
 
-## Kolejność działań
-1. **Poniedziałek:** Jasiek robi `netcheck` (instrukcja niżej) → znamy jego NAT.
-2. Jasiek `false` → **Opcja 1** (0 zł, nic nie psuje). Nie wyszło UDP-forward → Opcja 2.
-3. Jasiek `true`/CGNAT → **Opcja 3** (Peer Relay), docelowo **5**.
-4. Osobny x86 mini PC pojawi się kiedyś → **Opcja 4**. Boxa HA nie ruszamy.
+## Kolejność działań / stan
+1. ✅ **2026-06-21:** Jasiek `netcheck` → `MappingVariesByDestIP=false` (easy NAT). Gate zaliczony.
+2. ✅ **2026-06-21:** Tailscale CLI **zainstalowany na hoście** (`brew install tailscale`, 1.98.5).
+   Docelowy compose gotowy: `docker-compose.host-ts.yml`.
+3. ⏳ **CUTOVER (do zrobienia, gdy maczek włączony):** wg „Opcja 1 → Kroki". Wymaga interakcji
+   usera: `sudo` + logowanie Tailscale w przeglądarce → robi to z00rd.
+4. Po cutover: weryfikacja `tailscale ping` = `direct`, test wejścia Jaśka, aktualizacja Join IP.
+5. Gdyby UDP-forward nie wyszedł → fallback subnet-route / Opcja 2. (Jasiek easy NAT, więc
+   Opcja 3/5 raczej niepotrzebne.)
 
 ---
 
