@@ -6,6 +6,11 @@ zdalny gracz ma grać **płynnie** (direct P2P, nie przez relay). Stąd kilka za
 
 TL;DR jednym obrazkiem — strzałka pokazuje drogę pakietu od gracza do silnika gry:
 
+![Architektura — droga pakietu od gracza do silnika gry: gracz → Tailscale (direct) → host (tailscaled + udp-proxy) → vmnet → QEMU VM → Docker → kontener Valheim](docs/architecture-flow.png)
+
+<details>
+<summary>📝 kod źródłowy diagramu (Mermaid — edytowalny; GitHub renderuje go też natywnie)</summary>
+
 ```mermaid
 flowchart TB
     J["🎮 Zdalny gracz / Jasiek<br/>easy NAT · 100.126.x"]
@@ -31,6 +36,8 @@ flowchart TB
     PROXY -- "UDP → 192.168.106.2:2456" --> VMNET
     VMNET --> VH
 ```
+
+</details>
 
 ---
 
@@ -102,6 +109,11 @@ Pełna historia decyzji i odrzucone warianty (kabel/bridged, Peer Relay, płatny
 
 ## Cykl życia połączenia (sesja gry)
 
+![Cykl połączenia: gracz ↔ tailscaled ↔ udp-proxy ↔ Valheim, z direct hole-punch i per-klient mapowaniem](docs/architecture-sequence.png)
+
+<details>
+<summary>📝 kod źródłowy diagramu (Mermaid — edytowalny; GitHub renderuje go też natywnie)</summary>
+
 ```mermaid
 sequenceDiagram
     participant P as 🎮 Gracz
@@ -117,6 +129,8 @@ sequenceDiagram
     X-->>P: z powrotem do właściwego gracza
     Note over X: per-klient mapowanie → N graczy równocześnie (socat tego nie umiał)
 ```
+
+</details>
 
 ---
 
