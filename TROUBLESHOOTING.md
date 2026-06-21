@@ -1,132 +1,139 @@
-# Troubleshooting — pułapki i rozwiązania
+# Troubleshooting — pitfalls and fixes
 
-Realne problemy napotkane przy stawianiu tego serwera na Macu M1 (Apple Silicon) i jak je
-rozwiązać. Skróty komend zakładają, że jesteś w katalogu projektu.
+Real problems hit while standing this server up on an Apple-silicon (M-series) Mac, and how to
+solve them. Command shortcuts assume you're in the project directory.
 
-> Kontekst dockera w skryptach: `export DOCKER_CONTEXT=colima-valheim` (robią to za Ciebie).
-> Logi serwera na żywo: `./scripts/logs.sh` · pełny stan: `./scripts/status.sh`
+> Docker context used by the scripts: `export DOCKER_CONTEXT=colima-valheim` (they do it for you).
+> Live server logs: `./scripts/logs.sh` · full status: `./scripts/status.sh`
 
 ---
 
-### 1. VM nie wstaje: `guest agent binary could not be found for Linux-x86_64`
-Lima (pod Colimą) ma agenta gościa tylko dla architektury natywnej (arm64); dla VM **x86_64**
-potrzebny jest osobny pakiet.
+### 1. VM won't start: `guest agent binary could not be found for Linux-x86_64`
+Lima (under Colima) only ships a guest agent for the native architecture (arm64); an **x86_64** VM
+needs a separate package.
 ```bash
 brew install lima-additional-guestagents
-colima delete valheim --force      # sprzątnij nieudaną próbę (obraz zostaje w cache)
+colima delete valheim --force      # clean up the failed attempt (the image stays cached)
 ./scripts/setup.sh
 ```
 
-### 2. `colima start --vm-type qemu` pada: brak qemu
-Colima do emulacji x86_64 potrzebuje binarki QEMU (nie zawsze dociągana z `colima`).
+### 2. `colima start --vm-type qemu` fails: no qemu
+Colima needs the QEMU binary to emulate x86_64 (not always pulled in by `colima`).
 ```bash
 brew install qemu
 ```
 
-### 3. Docker Desktop + Rosetta zamiast tego? — NIE
-Obraz serwera (mono/Unity) **crashuje** pod „Use Rosetta for x86/amd64 emulation" w Docker
-Desktop (błąd codegen mono / SIGABRT). Dlatego ten projekt używa **Colima + pełny QEMU**
-(`--arch x86_64 --vm-type qemu`) — wolniejsze, ale stabilne. Nie przełączaj na Rosettę.
+### 3. Docker Desktop + Rosetta instead? — NO
+The server image (mono/Unity) **crashes** under "Use Rosetta for x86/amd64 emulation" in Docker
+Desktop (mono codegen error / SIGABRT). That's why this project uses **Colima + full QEMU**
+(`--arch x86_64 --vm-type qemu`) — slower, but stable. Don't switch to Rosetta.
 
 ### 4. SteamCMD: `Info request for AppId 896660 returned error Timeout` / `Failed to download`
-Najczęściej **przejściowe** (flaky metadane Steam) — nie panikuj, wymuś ponowienie:
+Usually **transient** (flaky Steam metadata) — don't panic, force a retry:
 ```bash
 docker exec valheim supervisorctl restart valheim-updater
 ```
-Updater i tak ponawia sam co 15 min. Jeśli powtarza się uparcie — sprawdź łączność (powinno być
-`Connecting anonymously to Steam Public... OK`); jeśli to widać, to nie sieć tylko chwilowy Steam.
+The updater retries by itself every 15 min anyway. If it keeps failing — check connectivity (you
+should see `Connecting anonymously to Steam Public... OK`); if you see that, it's not the network,
+just Steam being flaky.
 
-### 5. Restart serwera trwa ~7 minut
-Domyślnie obraz re-weryfikuje (`validate`) całe ~1,7 GB plików przy każdym starcie — pod QEMU to
-kilka minut. W tym projekcie wyłączone przez `STEAMCMD_ARGS: ""` w `docker-compose.yml`
-→ restart spada do ~2-3 min. Jeśli edytowałeś compose, upewnij się, że ta linia tam jest.
+### 5. A restart takes ~7 minutes
+By default the image re-verifies (`validate`) all ~1.7 GB of files on every start — under QEMU that's
+several minutes. This project disables it via `STEAMCMD_ARGS: ""` in `docker-compose.yml`
+→ restart drops to ~2-3 min. If you edited the compose, make sure that line is there.
 
-### 6. „Failed to connect" w grze, BEZ pytania o hasło
-Prompt o hasło pojawia się dopiero PO nawiązaniu połączenia. „Failed to connect" bez niego = klient
-nie dogadał się z serwerem. Najczęstsze przyczyny:
-- **Serwer jeszcze nie gotowy** — przy PIERWSZYM świecie generacja mapy pod QEMU trwa **20+ min**
-  (log stoi na `Generating locations` / `Failed to place all X` — to NORMALNE komunikaty, nie błędy;
-  CPU ~120% = pracuje). Do końca generacji serwer NIE przyjmuje graczy. Poczekaj na `Opened Steam server`.
-- **Łączysz się złym adresem** — użyj **IPv4 z Tailscale** (`100.x.y.z`), z portem `:2456`, przez
-  „Join IP". NIE krótkiej nazwy hosta (nie działa między tailnetami), NIE IPv6.
-- **Crossplay** — trzymaj wyłączony (patrz #9).
+### 6. "Failed to connect" in game, with NO password prompt
+The password prompt only appears AFTER a connection is established. "Failed to connect" without it =
+the client never reached the server. Most common causes:
+- **Server not ready yet** — on the FIRST world, map generation under QEMU takes **20+ min**
+  (the log sits on `Generating locations` / `Failed to place all X` — those are NORMAL generation
+  messages, not errors; CPU ~120% = it's working). Until generation finishes the server does NOT
+  accept players. Wait for `Opened Steam server`.
+- **Wrong address** — use the **Tailscale IPv4** (`100.x.y.z`) with port `:2456`, via "Join IP".
+  NOT the short hostname (won't work across tailnets), NOT IPv6.
+- **Crossplay** — keep it off (see #9).
 
-> Tip: pierwsza generacja jest jednorazowa. Import gotowego świata (`./scripts/import-world.sh`) ją POMIJA.
+> Tip: the first generation is one-time. Importing a ready world (`./scripts/import-world.sh`) skips it.
 
-### 7. Brak linii `listening on UDP port 2456` w logach
-Ta wersja serwera tego nie loguje. Sygnał gotowości to **`Opened Steam server`**, a potem cykliczny
-heartbeat `Connections X ZDOS:Y sent:Z recv:W` (co ~10 min). `./scripts/status.sh` to sprawdza.
+### 7. No `listening on UDP port 2456` line in the logs
+This server version doesn't log that. The readiness signal is **`Opened Steam server`**, then a
+periodic heartbeat `Connections X ZDOS:Y sent:Z recv:W` (every ~10 min). `./scripts/status.sh` checks it.
 
-### 8. Pusty serwer bierze ~50% CPU (albo ~1,2 rdzenia na Macu)
-Normalne. Valheim symuluje świat non-stop nawet bez graczy (~25-30% rdzenia natywnie), a QEMU to
-podbija (~1,2 z rdzeni Maca). To nie wyciek. `./scripts/stop.sh` ubija VM → 0% CPU, Mac może spać.
-Trzymaj Maca na zasilaniu podczas sesji (bateria + emulacja = grzanie/drenaż).
+### 8. An empty server takes ~50% CPU (or ~1.2 cores on the Mac)
+Normal. Valheim simulates the world non-stop even with no players (~25-30% of a core natively), and
+QEMU bumps that up (~1.2 Mac cores). It's not a leak. `./scripts/stop.sh` kills the VM → 0% CPU and
+the Mac can sleep. Keep the Mac on power during sessions (battery + emulation = heat/drain).
 
-### 9. Crossplay psuje połączenie przez Tailscale
-Crossplay kieruje ruch przez relay PlayFab (brak portu nasłuchu), co potrafi się wykładać za VPN/NAT.
-Trzymaj **crossplay wyłączony** (`SERVER_PUBLIC=false`, bez `-crossplay`) — wtedy idzie czyste
-połączenie Steam po Tailscale. Wszyscy gracze muszą mieć Valheima na **Steamie**.
+### 9. Crossplay breaks the Tailscale connection
+Crossplay routes traffic through the PlayFab relay (no listening port), which tends to fail behind
+VPN/NAT. Keep **crossplay off** (`SERVER_PUBLIC=false`, no `-crossplay`) — then it's a clean Steam
+connection over Tailscale. All players must own Valheim on **Steam**.
 
-### 10. Tailscale: udostępniać znajomym czy zapraszać?
-**Udostępniaj WĘZEŁ (Share), nie zapraszaj jako userów.** Zaproszenie wpuszcza ich do CAŁEGO Twojego
-tailnetu (w tym np. Home Assistant); Share daje dostęp tylko do węzła z serwerem.
-- Panel → Machines → `valheim-server` → ⋯ → **Share** → link dla każdego.
-- Tam samo: **Disable key expiry** dla węzła (żeby nie wylogował się między sesjami).
-- Domyślny ACL przepuszcza porty gry (2456-2457) dla udostępnionych — nic nie konfigurujesz.
-- Znajomi łączą się po `100.x.y.z:2456` (IPv4 z Tailscale).
+### 10. Tailscale: share with friends or invite them?
+**Share the NODE, don't invite them as users.** An invite lets them into your ENTIRE tailnet
+(including e.g. Home Assistant); Share gives access only to the server node.
+- Admin → Machines → server node → ⋯ → **Share** → a link for each person.
+- While there: **Disable key expiry** for the node (so it doesn't log out between sessions).
+- The default ACL lets shared users reach the game ports (2456-2457) — nothing to configure.
+- Friends connect to `100.x.y.z:2456` (the Tailscale IPv4).
 
-> Wyjątek: jeśli walczysz z lagiem zdalnego gracza i chcesz **Peer Relay** (patrz #14), Share to
-> **blokuje** — wtedy musisz zaprosić gracza jako **usera** (i najlepiej zawęzić ACL, by nie wystawiać
-> mu całej sieci). Samo Share nie jest przyczyną lagów (patrz #14), ale blokuje peer-relay i subnet-routes.
+> Note: if a remote player's traffic must reach the game port and your ACLs are customized, make sure
+> shared users (`autogroup:shared`) are allowed to the server node. With the default allow-all ACL it just works.
 
-### 11. Mac zasypia podczas gry
-`play.sh` uruchamia `caffeinate` — działa przy **otwartej klapie / na zasilaniu**. Zamknięta klapa:
+### 11. The Mac sleeps while playing
+`play.sh` runs `caffeinate` — works with the **lid open / on power**. Lid closed:
 ```bash
-sudo pmset -c disablesleep 1     # przed sesją (cofnij: sudo pmset -c disablesleep 0)
+sudo pmset -c disablesleep 1     # before the session (undo: sudo pmset -c disablesleep 0)
 ```
-Trzymaj na zasilaniu. Uwaga: serwer działa tylko gdy Mac jest **zalogowany** (Colima/docker chodzą
-w sesji użytkownika) — samo wybudzenie z ekranem logowania nie wystarczy.
+Keep it on power. Note: the server only runs while the Mac is **logged in** (Colima/docker live in
+the user session) — waking to a login screen isn't enough.
 
-### 12. Świat zniknął / chcę wgrać świat ze starej gry
-Świat żyje w wolumenie `valheim-config` (`/config/worlds_local` w kontenerze), przeżywa restarty.
-Import istniejącego świata (oba pliki o tej samej nazwie):
+### 12. The world is gone / I want to load a world from an old game
+The world lives in the `valheim-config` volume (`/config/worlds_local` in the container) and survives
+restarts. Import an existing world (both files, same name):
 ```bash
-./scripts/import-world.sh ~/Downloads/Świat.db ~/Downloads/Świat.fwl
+./scripts/import-world.sh ~/Downloads/World.db ~/Downloads/World.fwl
 ```
-Backupy świata: `./scripts/backup.sh` → `./backups/` (robi to też `stop.sh`).
+World backups: `./scripts/backup.sh` → `./backups/` (`stop.sh` does it too).
 
-### 13. Reset od zera
+### 13. Reset from scratch
 ```bash
 ./scripts/stop.sh
-colima delete valheim --force     # kasuje VM (świat ginie, jeśli nie masz backupu!)
+colima delete valheim --force     # deletes the VM (the world is lost unless you have a backup!)
 ./scripts/setup.sh
 ```
 
-### 14. Rubber-banding / lagi u ZDALNEGO gracza (a host-lokalny gra OK)
-Postacie „ślizgają się", mob teleportuje się martwy, lądy ładują się wolno przy żeglowaniu, w grze miga
-ikonka sieci — ale **tylko** u zdalnego gracza; host i gracze w tej samej sieci grają płynnie.
-To **NIE emulacja** (CPU ma zapas; gdyby nie nadążał serwer, ścinałoby wszystkich równo) ani **niczyje łącze**.
-To **relay DERP** Tailscale dla zdalnego peera.
+### 14. Rubber-banding / lag for a REMOTE player (while the local host plays fine) — SOLVED
+Symptoms: characters "slide", mobs teleport while dead, land loads slowly while sailing, a network
+icon flickers in game — but **only** for the remote player; the host and players on the same network
+are smooth. This is **NOT emulation** (CPU has headroom; if the server couldn't keep up it would
+stutter for everyone) and **not anyone's link**. It's a **Tailscale DERP relay** for the remote peer.
 
-**Przyczyna:** serwer w VM siedzi za **symetrycznym NAT-em** QEMU (slirp). Tailscale nie przebije go do
-direct dla zdalnego/cross-tailnet peera → spada na relay → jitter/dropy.
+**Cause:** when the Tailscale node runs **inside the VM**, it sits behind QEMU's **symmetric NAT**
+(slirp/vmnet). Tailscale can't punch a direct path for a remote/cross-tailnet peer → it falls back to
+the relay → jitter/drops.
 
-**Diagnoza:**
+**Diagnosis:**
 ```bash
-docker exec valheim-ts tailscale netcheck        # MappingVariesByDestIP: true = symetryczny NAT
-docker exec valheim-ts tailscale ping <peer-ip>  # "via DERP" = relay, "direct" = OK
+# from inside the VM (old sidecar setup): MappingVariesByDestIP: true = symmetric NAT
+docker exec valheim-ts tailscale netcheck
+# from the remote player's machine: "direct" = good, "via DERP" = relay
+tailscale ping <server-ip>
 ```
-Poproś też zdalnego gracza o `tailscale netcheck` u SIEBIE — jeśli on też ma `MappingVariesByDestIP: true`
-(albo CGNAT), to **oba twarde NAT-y** = direct praktycznie niemożliwy po stronie serwera → od razu Peer Relay / płatny host.
 
-**Fixy (od najlepszego):**
-1. **Wired Ethernet + Colima bridged** → serwer za samym routerem (zwykle łatwy NAT) → true direct P2P, najniższy ping.
-   Most L2 **nie działa po WiFi** → wymaga kabla (Mac bez portu = adapter USB-C→Ethernet). Po: `netcheck` ma pokazać
-   `MappingVariesByDestIP: false`. Opcjonalnie włącz NAT-PMP na routerze. (Bridged = `colima delete`+recreate z
-   `--network-address --network-interface <eth>`, socket_vmnet, sudo; świat zbackupuj.)
-2. **Peer Relay (bez kabla)** — zaproś gracza jako **usera** (NIE share; share blokuje peer-relay), postaw prywatny
-   relay Tailscale na dobrze podłączonym sprzęcie → nie-DERP, niski ping.
-3. **Płatny host** z publicznym IP — eliminuje cały problem NAT (ale nie 0 zł).
+**The fix this project uses — run Tailscale on the Mac HOST, not in the VM.** The host sits behind
+the router's *easy* NAT, so a remote player gets **direct P2P** instead of the relay. A small
+`udp-proxy.py` bridge then carries the game's UDP from the host into the VM/container. This is wired
+into `play.sh`/`stop.sh` and is the default. Full explanation and diagram: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-Uwaga: node-sharing samo w sobie NIE powoduje relayu (Tailscale traktuje shared == ten sam tailnet na poziomie
-danych) — winny jest symetryczny NAT. Ale sharing **blokuje** Peer Relay i subnet-routes (stąd invite-as-user dla fixu #2).
+Two bugs found while building the bridge (both fixed in `scripts/udp-proxy.py`, kept here as a warning):
+- `socat -T<sec>` on a `UDP-LISTEN` listener gets killed after that many seconds of silence → the
+  remote player hits a dead relay after the first idle window. (Fix: no idle timeout on the listener.)
+- `socat UDP-LISTEN,fork` mangles demultiplexing with **more than one** concurrent client (each works
+  alone, but a second player drops). (Fix: a proper per-client UDP proxy.)
+
+Other ways to give remote players a direct path, if host-TS isn't an option:
+- **Wired Ethernet + Colima bridged** (lowest ping; an L2 bridge won't work over Wi-Fi → needs a
+  USB-C→Ethernet adapter).
+- **Tailscale Peer Relay** (invite the player as a *user*, not a share) — still a relay, but private/low-ping.
+- **A paid host** with a public IP — removes the NAT problem entirely (not free).

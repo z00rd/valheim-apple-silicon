@@ -1,110 +1,120 @@
-# Valheim — prywatny serwer na Macu (Apple Silicon) przez Tailscale
+# 🛡️ Valheim on a Mac (Apple Silicon) — private server over Tailscale
 
-Postaw dedykowany serwer Valheim dla paczki znajomych na **MacBooku/Macu z M-serią**, za **0 zł**,
-**bez publicznego IP i bez port-forwardingu**. Gracie na żądanie, znajomi łączą się przez Tailscale.
-Wszystko oskryptowane: jedna komenda start, jedna stop.
+> A dedicated **Valheim** server for you and your friends, running on an **Apple-silicon Mac** —
+> **for free**, with **no public IP**, **no port-forwarding**, and **remote players on a direct
+> P2P link (low ping)**. One command to start, one to stop.
 
-> Stan: **działa**, przetestowane na MacBooku Pro M1 / macOS 26. Dla 3 graczy spokojnie wystarcza.
+![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-arm64-000000?logo=apple&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
+![QEMU](https://img.shields.io/badge/QEMU-x86__64-EE0000?logo=qemu&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![Tailscale](https://img.shields.io/badge/Tailscale-WireGuard-242424?logo=tailscale&logoColor=white)
+![cost](https://img.shields.io/badge/cost-%240-brightgreen)
+![status](https://img.shields.io/badge/status-working-success)
+![license](https://img.shields.io/badge/license-MIT-blue)
 
-> 📐 **Jak to działa pod spodem — warstwy abstrakcji i droga pakietu (diagramy):**
-> **[ARCHITECTURE.md](ARCHITECTURE.md)**
+|  | |
+|---|---|
+| **What** | A fully scripted Valheim server that runs on your Mac and is reachable by your friends **only inside your private Tailscale network**. |
+| **Why** | So **anyone can hop in whenever they want** — without hosting anything themselves, without exposing ports to the internet, and without paying for a monthly game host. The world stays up regardless of who is online. |
+| **How** | The server (an **x86_64** binary) runs in an emulated VM (**QEMU**) inside **Docker**; **Tailscale on the Mac host** gives friends a secure, **direct** tunnel (direct P2P, not a relay → low ping). |
 
 ---
 
-## Dlaczego tak (architektura)
+## ✨ What you get
 
-Dedykowany serwer Valheim istnieje **wyłącznie jako binarka x86_64** (Linux/Windows) — nie ma builda
-na ARM ani na macOS. Na Apple Silicon trzeba go więc emulować. Sprawdzone, stabilne podejście:
+- 💸 **$0** — no hosting bill; runs on hardware you already own.
+- 🔒 **Private** — no public IP, no open ports on your router; only your tailnet can reach it.
+- 🎮 **Remote players play smoothly** — the Tailscale node lives on the host (easy NAT), so you get **direct P2P** instead of a DERP relay (the usual cause of rubber-banding).
+- ⚡ **One command** — `play.sh` brings everything up, `stop.sh` tears it down and lets the Mac sleep.
+- 💾 **Hands-off** — automatic server updates and periodic world backups out of the box.
+- 🧩 **Bring your own world** — import an existing world (`.db` + `.fwl`) and keep playing.
 
-```
-[Mac arm64]  za EASY NAT routera
-  ├─ tailscaled (węzeł 100.x)   ── easy NAT → DIRECT P2P do graczy
-  ├─ udp-proxy.py  *:2456-2457  ──► przerzut do VM
-  └─ [VM x86_64, pełny QEMU (Colima/Lima)]
-        └─ Docker → kontener valheim  (Steam UDP 2456/2457)
+## 🧱 Stack
 
-  znajomy z Tailscale ──WireGuard (direct)──▶ 100.x.y.z : 2456
-```
+| Layer | Technology | Role |
+|---|---|---|
+| 🖥️ Host | **macOS · Apple Silicon (arm64)** | the machine + the network node (behind the router's **easy NAT**) |
+| 🔑 Network | **Tailscale** (WireGuard) | private tunnel, **direct P2P**, zero port-forwarding |
+| 🔀 UDP bridge | **udp-proxy.py** | host→VM relay (Lima doesn't forward UDP) |
+| 📦 Virtualization | **Colima · Lima · QEMU** | **x86_64** emulation on arm64 |
+| 🐳 Container | **Docker · [lloesche/valheim-server](https://github.com/lloesche/valheim-server-docker)** | the server + auto-update + backups |
+| ⚔️ Game | **Valheim dedicated** | the actual server |
 
-- **Colima + pełny QEMU**, nie Docker Desktop + Rosetta — Rosetta crashuje silnik mono/Unity tego
-  serwera. Pełny QEMU jest wolniejszy, ale działa stabilnie.
-- **Tailscale na HOŚCIE Maca (nie w VM)** — tylko host jest za **easy NAT**, więc zdalny gracz dostaje
-  **direct P2P**, a nie relay DERP (to było źródło lagów). Ruch do kontenera dokłada most
-  `udp-proxy.py` (host ⇄ vmnet ⇄ VM). Prosty wariant ze starym sidecarem w VM (laggy dla zdalnych)
-  zostaje jako rollback w `docker-compose.sidecar.yml`.
-- **Obraz** [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker) — daje
-  auto-update serwera, cykliczne backupy świata i opcjonalne mody „z pudełka".
+## 🗺️ How it works (one picture)
 
-> 📐 Pełne diagramy warstw i cyklu połączenia: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+A packet's journey from a player to the game engine — the nested layers of abstraction:
 
-## Wymagania
+![Architecture: player → Tailscale (direct) → host (tailscaled + udp-proxy) → vmnet → QEMU VM → Docker → Valheim container](docs/architecture-flow.png)
 
-- Mac z **Apple Silicon** (M1/M2/M3/M4), macOS 13+ (testowane na 26). Min. **8 GB RAM**, ~10 GB dysku.
-- **[Homebrew](https://brew.sh)**.
-- Konto **[Tailscale](https://tailscale.com)** (darmowy plan wystarcza: 6 userów / nielimit urządzeń).
-- Wszyscy gracze mają **Valheima na Steamie** (crossplay jest wyłączony — patrz niżej).
+> 📐 Full architecture, a sequence diagram, and **why the Tailscale node must live on the host and
+> not inside the VM** (the root of the lag problem): **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-## Szybki start
+---
+
+## 🚀 Quick start
 
 ```bash
-git clone <to-repo> valheim-server && cd valheim-server
+git clone <this-repo> valheim-server && cd valheim-server
 
-./scripts/bootstrap.sh           # 1. instaluje colima, qemu, lima-additional-guestagents, docker
-cp .env.example .env             # 2. (bootstrap robi to sam, jeśli brak)
-$EDITOR .env                     #    uzupełnij: SERVER_NAME, SERVER_PASS (min. 5 zn.), TS_AUTHKEY
-./scripts/doctor.sh              # 3. sprawdzenie gotowości
-./scripts/setup.sh               # 4. postawienie (PIERWSZY raz ~15+ min: emuluje x86 Ubuntu + pobiera serwer)
+./scripts/bootstrap.sh           # 1. installs colima, qemu, lima-additional-guestagents, docker
+cp .env.example .env             # 2. (bootstrap does this for you if missing)
+$EDITOR .env                     #    fill in: SERVER_NAME, SERVER_PASS (min. 5 chars)
+./scripts/doctor.sh              # 3. preflight check
+./scripts/setup.sh               # 4. provision (first run ~15+ min: emulates x86 + downloads the server)
 ```
 
-**Auth key Tailscale:** wygeneruj na <https://login.tailscale.com/admin/settings/keys> →
-„Generate auth key" → zaznacz **Reusable**, zostaw **Ephemeral wyłączone** → wklej do `.env` jako `TS_AUTHKEY`.
+Direct P2P for remote players requires **Tailscale running on the Mac host** (one-time:
+`brew install tailscale && sudo brew services start tailscale && tailscale up`). The `play.sh` /
+`stop.sh` scripts handle the rest (vmnet + the UDP bridge). Details and the "simple" variant
+(in-VM sidecar): [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Po `setup.sh` adres serwera pokaże `./scripts/status.sh`. W panelu Tailscale **wyłącz wygasanie klucza**
-węzła `valheim-server` (Machines → ⋯ → Disable key expiry), żeby nie wylogował się między sesjami.
+Day to day: **`./scripts/play.sh`** when you play, **`./scripts/stop.sh`** when you're done.
 
-## Skrypty
+## 🧰 Scripts
 
-| Skrypt | Do czego |
+| Script | Purpose |
 |---|---|
-| `scripts/bootstrap.sh` | jednorazowo: instaluje wszystkie zależności (Homebrew) |
-| `scripts/doctor.sh` | preflight: sprawdza narzędzia + `.env` (nic nie zmienia) |
-| `scripts/setup.sh` | jednorazowo: tworzy VM x86_64 (QEMU) i podnosi serwer + Tailscale |
-| `scripts/play.sh` | **start sesji** — VM + serwer + Mac nie zaśnie (jedna komenda) |
-| `scripts/stop.sh` | **koniec sesji** — backup + stop serwera + stop VM (Mac może spać) |
-| `scripts/status.sh` | co działa + adres dla znajomych |
-| `scripts/logs.sh` | logi serwera na żywo |
-| `scripts/backup.sh` | zrzut świata na dysk Maca (opcjonalnie na Google Drive) |
-| `scripts/update.sh` | aktualizacja obrazu kontenera |
-| `scripts/import-world.sh` | wgranie istniejącego świata (`.db` + `.fwl`) |
+| `scripts/bootstrap.sh` | one-time: installs all dependencies (Homebrew) |
+| `scripts/doctor.sh` | preflight: checks tools + `.env` (changes nothing) |
+| `scripts/setup.sh` | one-time: creates the x86_64 VM (QEMU) and brings up the server |
+| `scripts/play.sh` | **start a session** — VM + server + UDP bridge + keep-awake (one command) |
+| `scripts/stop.sh` | **end a session** — backup + stop bridge/server/VM (Mac can sleep) |
+| `scripts/host-ts-bridge.sh` | the host→VM UDP bridge (start/stop/status); launched by `play.sh` |
+| `scripts/status.sh` | what's running + the address to share with friends |
+| `scripts/logs.sh` | live server logs |
+| `scripts/backup.sh` | dump the world to the Mac's disk (optionally to Google Drive) |
+| `scripts/update.sh` | update the container image |
+| `scripts/import-world.sh` | import an existing world (`.db` + `.fwl`) |
 
-Na co dzień: **`./scripts/play.sh`** gdy gracie, **`./scripts/stop.sh`** gdy koniec.
+## 🎮 How friends connect
 
-## Jak łączą się znajomi
+1. They install Tailscale and sign in to **their own** account.
+2. **You share the node with them** (do NOT invite them to your network — see "Security"): Tailscale
+   admin → **Machines → the server node → ⋯ → Share** → send each person the link. They accept.
+3. `./scripts/status.sh` shows the address. In game: **Start Game → Join Game → Join IP** →
+   `100.x.y.z:2456` + password.
 
-1. Instalują Tailscale i logują się na **swoje** konto.
-2. **Udostępniasz im węzeł** (NIE zapraszasz do sieci — patrz „Bezpieczeństwo"): panel Tailscale →
-   **Machines → `valheim-server` → ⋯ → Share** → wyślij link każdemu. Akceptują.
-3. Adres podaje `./scripts/status.sh`. W grze: **Start Game → Join Game → Join IP** → `100.x.y.z:2456` + hasło.
+> The server is private (`SERVER_PUBLIC=false`) — it never shows up in the public list, only via "Join IP".
+> All players need **Valheim on Steam** (crossplay is off — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
-> Serwer jest prywatny (`SERVER_PUBLIC=false`) — nie pojawia się na liście, tylko „Join IP".
+## 📥 Import a world
 
-## Import świata
-
-Poproś o **oba** pliki (ta sama nazwa bazowa): `<Świat>.db` i `<Świat>.fwl`
-(Windows: `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\worlds_local\`). Potem:
+Ask for **both** files (same base name): `<World>.db` and `<World>.fwl`
+(Windows: `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\worlds_local\`). Then:
 ```bash
-./scripts/import-world.sh ~/Downloads/Świat.db ~/Downloads/Świat.fwl
+./scripts/import-world.sh ~/Downloads/World.db ~/Downloads/World.fwl
 ```
-Skrypt skopiuje świat, ustawi `WORLD_NAME` w `.env` i zrestartuje serwer. Import gotowego świata
-**pomija** wolną pierwszą generację mapy.
+The script copies the world, sets `WORLD_NAME` in `.env` and restarts the server. Importing a ready
+world **skips** the slow first map generation.
 
-## Backupy
+## 💾 Backups
 
-- Obraz robi cykliczne zip-backupy świata (`BACKUPS_CRON` w compose).
-- `./scripts/backup.sh` zrzuca je na Maca do `./backups/` (+ żywy świat jako zapas). `stop.sh` robi to automatycznie.
-- Chmura: ustaw `GDRIVE_DIR` w `.env` na folder w zsynchronizowanym Google Drive.
-- Retencja: obraz trzyma 12 backupów w kontenerze, `backup.sh` 30 na Macu (celowo różne).
-- **Auto-backup co 30 min (opcjonalnie)** — `~/Library/LaunchAgents/com.valheim.backup.plist`:
+- The image makes periodic zip backups of the world; `./scripts/backup.sh` pulls them onto the Mac
+  into `./backups/` (plus the live world as a spare). `stop.sh` does this automatically.
+- Cloud: set `GDRIVE_DIR` in `.env` to a folder inside a synced Google Drive.
+- Retention: 12 backups in the container, 30 on the Mac (intentionally different).
+- **Auto-backup every 30 min (optional)** — LaunchAgent `~/Library/LaunchAgents/com.valheim.backup.plist`:
   ```xml
   <?xml version="1.0" encoding="UTF-8"?>
   <plist version="1.0"><dict>
@@ -116,62 +126,53 @@ Skrypt skopiuje świat, ustawi `WORLD_NAME` w `.env` i zrestartuje serwer. Impor
     <key>StandardErrorPath</key><string>/tmp/valheim-backup.err</string>
   </dict></plist>
   ```
-  Załaduj: `launchctl load ~/Library/LaunchAgents/com.valheim.backup.plist` (backup działa tylko gdy serwer chodzi).
+  Load it: `launchctl load ~/Library/LaunchAgents/com.valheim.backup.plist` (only runs while the server is up).
 
-## Aktualizacje
+## 🔄 Updates
 
-- Serwer Valheim **auto-aktualizuje się sam** co 15 min, gdy nikt nie gra. `./scripts/update.sh`
-  aktualizuje obraz kontenera (rzadziej potrzebne).
-- **Przed sesją** dogadajcie w paczce „aktualizujcie klienty" — serwer i gracze muszą być na tej samej
-  wersji Valheima, inaczej „Incompatible version".
+- The Valheim server **auto-updates itself** every 15 min while nobody is playing. `./scripts/update.sh`
+  updates the container image (rarely needed).
+- **Before a session**, agree on "update your clients" — server and players must be on the same
+  version, otherwise "Incompatible version".
 
-## Zdalne zarządzanie (opcjonalnie)
+## 🛰️ Remote management (optional)
 
-Żeby odpalać serwer spoza domu: zainstaluj Tailscale na samym Macu, włącz **System Settings → General →
-Sharing → Remote Login**, i z dowolnego urządzenia w tailnecie: `ssh user@<tailscale-IP-Maca>` →
-`cd ~/valheim-server && ./scripts/play.sh`.
+To start the server from outside your home: you already run Tailscale on the Mac for direct P2P, so
+just enable **System Settings → General → Sharing → Remote Login**, then from any device on the
+tailnet: `ssh user@<Mac-tailscale-IP>` → `cd ~/valheim-server && ./scripts/play.sh`.
 
-## Mac nie może spać podczas gry
+## 😴 The Mac must not sleep while playing
 
-`play.sh` uruchamia `caffeinate` (działa przy otwartej klapie / na zasilaniu). Zamknięta klapa:
-`sudo pmset -c disablesleep 1` przed sesją (`...disablesleep 0` po). Trzymaj Maca na zasilaniu.
-Serwer działa tylko gdy Mac jest **zalogowany** (Colima/docker w sesji użytkownika).
+`play.sh` runs `caffeinate` (works with the lid open / on power). Lid closed:
+`sudo pmset -c disablesleep 1` before the session (`...disablesleep 0` after). Keep the Mac on power.
+The server only runs while the Mac is **logged in** (Colima/docker live in the user session).
 
-## Czego się spodziewać (wydajność)
+## 📊 What to expect (performance)
 
-- To **emulacja** — pierwsza generacja świata pod QEMU jest wolna (~20+ min, **jednorazowo**;
-  import gotowego świata ją pomija). Samo granie jest dużo lżejsze.
-- Pusty serwer bierze ~1 rdzeń Maca (cecha Valheima + narzut QEMU) — znika do 0 po `stop.sh`.
-- Dla ~3 casualowych graczy zapas jest spory. To **nie** serwer 24/7 — Mac musi być wybudzony i zalogowany.
+- It's **emulation** — the first world generation under QEMU is slow (~20+ min, **one-time**;
+  importing a ready world skips it). Actual gameplay is much lighter.
+- An idle server uses ~1 Mac core (a Valheim trait + QEMU overhead) — drops to 0 after `stop.sh`.
+- For ~3 casual players there's plenty of headroom. This is **not** a 24/7 server — the Mac must be
+  awake and logged in.
 
-## Zdalni gracze: direct (rozwiązane)
+## 🔐 Security
 
-Zdalny gracz gra **płynnie (direct P2P)** dzięki temu, że węzeł Tailscale stoi **na hoście Maca**
-(easy NAT), a nie w VM. Gdyby węzeł siedział w VM, trafiałby za **symetryczny NAT QEMU** → relay
-DERP → jitter i „ślizganie" postaci (to NIE wina emulacji ani łącza). Sprawdzenie u gracza:
-`tailscale ping <adres-serwera>` → ma pokazać **`direct`**, nie `via DERP`.
+- **Secrets never go to the repo:** `.env` (password) is in `.gitignore`. Commit only `.env.example`.
+- **Share the node, don't invite a user:** inviting someone to your tailnet gives them access to your
+  WHOLE network (e.g. Home Assistant); Share grants access to the server node only.
 
-Jak to spięte (host-TS + vmnet + `udp-proxy.py`) i dlaczego akurat tak — z diagramami:
-**[ARCHITECTURE.md](ARCHITECTURE.md)**. Historia decyzji i odrzucone warianty (kabel/bridged, Peer
-Relay, płatny host): [ROADMAP.md](ROADMAP.md). Realne pułapki: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) (#14).
+## 🆘 Trouble?
 
-## Bezpieczeństwo
+**[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** — real-world pitfalls (missing x86_64 guest agent, SteamCMD
+timeouts, "failed to connect" during generation, slow restarts, idle CPU, Tailscale share vs invite,
+direct vs relay).
 
-- **Sekrety nie idą do repo:** `.env` (hasło, `TS_AUTHKEY`) jest w `.gitignore`. Commituj tylko `.env.example`.
-- **Share węzła, nie zaproszenie usera:** zaproszenie do tailnetu daje znajomym dostęp do CAŁEJ Twojej
-  sieci (np. Home Assistant); Share — tylko do węzła z serwerem.
-
-## Problemy?
-
-Zobacz **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** — zebrane realne pułapki (brak agenta x86_64, timeouty
-SteamCMD, „failed to connect" podczas generacji, wolny restart, idle CPU, Tailscale share vs invite, ...).
-
-## Podziękowania
+## 🙏 Credits
 
 [lloesche/valheim-server-docker](https://github.com/lloesche/valheim-server-docker) ·
 [Colima](https://github.com/abiosoft/colima) · [Lima](https://github.com/lima-vm/lima) ·
 [Tailscale](https://tailscale.com) · Iron Gate (Valheim).
 
-## Licencja
+## 📄 License
 
-MIT — patrz [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

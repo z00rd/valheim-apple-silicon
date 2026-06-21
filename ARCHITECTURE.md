@@ -1,36 +1,37 @@
-# Architektura — jak to działa
+# Architecture — how it works
 
-Serwer Valheim to binarka **x86_64**, więc na Macu z **Apple Silicon (arm64)** musi iść przez
-emulację. Do tego dochodzi sieć: znajomi mają wejść **bez publicznego IP i port-forwardingu**, a
-zdalny gracz ma grać **płynnie** (direct P2P, nie przez relay). Stąd kilka zagnieżdżonych warstw.
+The Valheim server is an **x86_64** binary, so on an **Apple-silicon (arm64)** Mac it has to run
+under emulation. On top of that there's the network goal: friends should connect **without a public
+IP or port-forwarding**, and a remote player should play **smoothly** (direct P2P, not via a relay).
+Hence a few nested layers.
 
-TL;DR jednym obrazkiem — strzałka pokazuje drogę pakietu od gracza do silnika gry:
+TL;DR in one picture — the arrow follows a packet from the player to the game engine:
 
-![Architektura — droga pakietu od gracza do silnika gry: gracz → Tailscale (direct) → host (tailscaled + udp-proxy) → vmnet → QEMU VM → Docker → kontener Valheim](docs/architecture-flow.png)
+![Architecture — a packet's path from player to game engine: player → Tailscale (direct) → host (tailscaled + udp-proxy) → vmnet → QEMU VM → Docker → Valheim container](docs/architecture-flow.png)
 
 <details>
-<summary>📝 kod źródłowy diagramu (Mermaid — edytowalny; GitHub renderuje go też natywnie)</summary>
+<summary>📝 diagram source (Mermaid — editable; GitHub also renders it natively)</summary>
 
 ```mermaid
 flowchart TB
-    J["🎮 Zdalny gracz / Jasiek<br/>easy NAT · 100.126.x"]
-    L["🎮 Gracz w LAN<br/>megalodon"]
+    J["🎮 Remote player<br/>easy NAT"]
+    L["🎮 LAN player"]
 
-    subgraph MAC["🖥️ macOS host — Apple Silicon (arm64) · za routerem ASUS = EASY NAT"]
-        TS["🔑 tailscaled<br/>węzeł macbook-priv<br/>100.103.236.80<br/><b>JEDYNY easy-NAT punkt</b>"]
-        PROXY["🔀 udp-proxy.py<br/>nasłuch *:2456-2457<br/>per-klient → VM"]
+    subgraph MAC["🖥️ macOS host — Apple Silicon (arm64) · behind router = EASY NAT"]
+        TS["🔑 tailscaled<br/>node on the host (100.x)<br/><b>the ONLY easy-NAT point</b>"]
+        PROXY["🔀 udp-proxy.py<br/>listens on *:2456-2457<br/>per-client → VM"]
 
-        subgraph VM["📦 Colima → Lima → QEMU · VM x86_64 (pełna emulacja)"]
-            VMNET["🔌 vmnet<br/>192.168.106.2<br/>(osiągalne z hosta)"]
-            subgraph DOCK["🐳 Docker (w VM)"]
-                subgraph CONT["kontener lloesche/valheim-server"]
-                    VH["⚔️ Valheim dedicated server<br/>binarka x86_64<br/>Steam UDP :2456 gra / :2457 query"]
+        subgraph VM["📦 Colima → Lima → QEMU · x86_64 VM (full emulation)"]
+            VMNET["🔌 vmnet<br/>192.168.106.2<br/>(reachable from host)"]
+            subgraph DOCK["🐳 Docker (inside the VM)"]
+                subgraph CONT["lloesche/valheim-server container"]
+                    VH["⚔️ Valheim dedicated server<br/>x86_64 binary<br/>Steam UDP :2456 game / :2457 query"]
                 end
             end
         end
     end
 
-    J -- "WireGuard · direct 11 ms<br/>→ :2456" --> TS
+    J -- "WireGuard · direct (~11 ms)<br/>→ :2456" --> TS
     L -- "WireGuard · LAN" --> TS
     TS --> PROXY
     PROXY -- "UDP → 192.168.106.2:2456" --> VMNET
@@ -41,109 +42,115 @@ flowchart TB
 
 ---
 
-## Warstwy abstrakcji (matrioszka)
+## Layers of abstraction (matryoshka)
 
-Każda ramka żyje **wewnątrz** poprzedniej. Od fizycznego Maca aż do procesu silnika gry:
+Each box lives **inside** the previous one. From the physical Mac down to the game engine process:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│  🖥️  macOS — Apple Silicon (arm64)               za routerem ASUS  =  EASY NAT │
+│  🖥️  macOS — Apple Silicon (arm64)                  behind the router  =  EASY NAT │
 │                                                                              │
-│   🔑 tailscaled .......... węzeł "macbook-priv" 100.103.236.80  ── easy NAT ✔ │
-│   🔀 udp-proxy.py ........ nasłuch *:2456-2457  ──►  przerzut do VM (per-klient)│
+│   🔑 tailscaled .......... node on the host (addr 100.x)  ──────── easy NAT ✔ │
+│   🔀 udp-proxy.py ........ listens on *:2456-2457  ──►  relays to the VM       │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  📦 Colima ─► Lima ─► QEMU :  VM x86_64   (pełna emulacja, nie Rosetta) │  │
-│   │     vmnet:  192.168.106.2   (most host⇄VM, dzięki --network-address)    │  │
+│   │  📦 Colima ─► Lima ─► QEMU :  x86_64 VM   (full emulation, not Rosetta) │  │
+│   │     vmnet:  192.168.106.2   (host⇄VM bridge, via --network-address)     │  │
 │   │                                                                        │  │
 │   │   ┌────────────────────────────────────────────────────────────────┐  │  │
-│   │   │  🐳 Docker  (silnik w VM)                                        │  │  │
+│   │   │  🐳 Docker  (engine inside the VM)                               │  │  │
 │   │   │   ┌──────────────────────────────────────────────────────────┐  │  │  │
-│   │   │   │  📦 kontener  lloesche/valheim-server                     │  │  │  │
-│   │   │   │       ⚔️ Valheim dedicated server  (binarka x86_64)        │  │  │  │
-│   │   │   │       Steam UDP  :2456 (gra)  ·  :2457 (query)            │  │  │  │
-│   │   │   │       + auto-update + cykliczne backupy świata            │  │  │  │
+│   │   │   │  📦 container  lloesche/valheim-server                    │  │  │  │
+│   │   │   │       ⚔️ Valheim dedicated server  (x86_64 binary)         │  │  │  │
+│   │   │   │       Steam UDP  :2456 (game)  ·  :2457 (query)           │  │  │  │
+│   │   │   │       + auto-update + periodic world backups             │  │  │  │
 │   │   │   └──────────────────────────────────────────────────────────┘  │  │  │
 │   │   └────────────────────────────────────────────────────────────────┘  │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| # | Warstwa | Technologia | Rola | Dlaczego akurat tak |
-|---|---------|-------------|------|---------------------|
-| 1 | Host | **macOS / Apple Silicon** | fizyczna maszyna; tu żyje węzeł sieci | jest za **easy NAT** routera — klucz do direct P2P |
-| 2 | Sieć węzła | **tailscaled (na hoście)** | węzeł tailnetu `macbook-priv`, adres `100.x` | tylko **host** ma easy NAT; węzeł w VM = symetryk |
-| 3 | Most UDP | **udp-proxy.py** | `*:2456-2457` na hoście → port w VM | Lima **nie** forwarduje UDP; socat sypał multi-klienta |
-| 4 | Wirtualizacja | **Colima → Lima → QEMU** | VM **x86_64** na arm64 | serwer istnieje tylko jako binarka x86_64 |
-| 5 | Sieć VM | **vmnet** (`--network-address`) | daje VM IP `192.168.106.2` osiągalny z hosta | bez tego host nie ma jak dosięgnąć kontenera |
-| 6 | Konteneryzacja | **Docker** (w VM) | izolacja + automaty (update/backup) | obraz `lloesche` ma to „z pudełka" |
-| 7 | Aplikacja | **Valheim dedicated** | właściwy serwer gry | — |
+| # | Layer | Technology | Role | Why this way |
+|---|-------|------------|------|--------------|
+| 1 | Host | **macOS / Apple Silicon** | the machine; the network node lives here | it's behind the router's **easy NAT** — the key to direct P2P |
+| 2 | Node network | **tailscaled (on the host)** | tailnet node on the host, address `100.x` | only the **host** has easy NAT; a node inside the VM is symmetric |
+| 3 | UDP bridge | **udp-proxy.py** | `*:2456-2457` on the host → port in the VM | Lima does **not** forward UDP; socat mangled multi-client |
+| 4 | Virtualization | **Colima → Lima → QEMU** | **x86_64** VM on arm64 | the server only exists as an x86_64 binary |
+| 5 | VM network | **vmnet** (`--network-address`) | gives the VM IP `192.168.106.2`, reachable from the host | without it the host can't reach the container |
+| 6 | Containerization | **Docker** (in the VM) | isolation + automation (update/backup) | the `lloesche` image ships this out of the box |
+| 7 | Application | **Valheim dedicated** | the actual game server | — |
 
-> Dlaczego **QEMU**, a nie Docker Desktop + Rosetta: Rosetta crashuje silnik mono/Unity tego
-> serwera. Pełny QEMU jest wolniejszy, ale stabilny. Szczegóły: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-
----
-
-## Sedno: dlaczego węzeł Tailscale jest na HOŚCIE, a nie w VM
-
-To była cała zagadka „zdalny gracz laguje, lokalny nie". Połączenie direct P2P w Tailscale wymaga
-**easy NAT po obu stronach**. A NAT zależy od tego, **gdzie** stoi węzeł:
-
-```
- ❌ węzeł TS WEWNĄTRZ VM        VM ─NAT QEMU (slirp/vmnet)─ ASUS ─ internet
-                                └── podwójny NAT = SYMETRYCZNY  →  relay DERP  →  jitter / lag
-
- ✔ węzeł TS NA HOŚCIE Maca      Mac ─ ASUS ─ internet
-                                └── pojedynczy EASY NAT  →  direct P2P  →  płynnie (11 ms)
-```
-
-Symetryczny NAT QEMU to **artefakt wirtualizacji**, nie własność łącza. Sprawdzone empirycznie:
-`tailscale netcheck` z wnętrza VM zawsze dawał `MappingVariesByDestIP: true` (nawet po vmnet),
-a z hosta — `false` + `PortMapping: UPnP, NAT-PMP, PCP`. Dlatego węzeł musi siedzieć na hoście,
-a ruch do kontenera dokłada most `udp-proxy.py` (host ⇄ vmnet ⇄ VM).
-
-Pełna historia decyzji i odrzucone warianty (kabel/bridged, Peer Relay, płatny host):
-[ROADMAP.md](ROADMAP.md).
+> Why **QEMU** and not Docker Desktop + Rosetta: Rosetta crashes this server's mono/Unity engine.
+> Full QEMU is slower but stable. Details: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
-## Cykl życia połączenia (sesja gry)
+## The crux: why the Tailscale node lives on the HOST, not in the VM
 
-![Cykl połączenia: gracz ↔ tailscaled ↔ udp-proxy ↔ Valheim, z direct hole-punch i per-klient mapowaniem](docs/architecture-sequence.png)
+This was the whole "remote player lags, local player doesn't" puzzle. A direct P2P connection in
+Tailscale needs **easy NAT on both ends**. And the NAT type depends on **where** the node sits:
+
+```
+ ❌ TS node INSIDE the VM        VM ─QEMU NAT (slirp/vmnet)─ router ─ internet
+                                 └── double NAT = SYMMETRIC  →  DERP relay  →  jitter / lag
+
+ ✔ TS node ON the Mac HOST       Mac ─ router ─ internet
+                                 └── single EASY NAT  →  direct P2P  →  smooth (~11 ms)
+```
+
+QEMU's symmetric NAT is an **artifact of virtualization**, not a property of your link. Verified
+empirically: `tailscale netcheck` from inside the VM always reported `MappingVariesByDestIP: true`
+(even with vmnet), while from the host it was `false` + `PortMapping: UPnP, NAT-PMP, PCP`. So the
+node has to sit on the host, and a `udp-proxy.py` bridge carries traffic to the container
+(host ⇄ vmnet ⇄ VM).
+
+**Rejected alternatives (and why):**
+- **Wired Ethernet + Colima bridged** — gives true direct P2P (lowest ping), but an L2 bridge won't
+  work over Wi-Fi → needs a USB-C→Ethernet adapter. Unnecessary once host-TS gives direct without a cable.
+- **Tailscale Peer Relay** — works, but it's still a relay (higher ping) and needs a relay node online.
+- **A paid host with a public IP** — removes the whole NAT problem, but costs money every month.
+
+Host-TS won: **direct P2P, $0, no cable.**
+
+---
+
+## Connection lifecycle (a play session)
+
+![Connection lifecycle: player ↔ tailscaled ↔ udp-proxy ↔ Valheim, with a direct hole-punch and per-client mapping](docs/architecture-sequence.png)
 
 <details>
-<summary>📝 kod źródłowy diagramu (Mermaid — edytowalny; GitHub renderuje go też natywnie)</summary>
+<summary>📝 diagram source (Mermaid — editable; GitHub also renders it natively)</summary>
 
 ```mermaid
 sequenceDiagram
-    participant P as 🎮 Gracz
+    participant P as 🎮 Player
     participant T as 🔑 tailscaled (host)
     participant X as 🔀 udp-proxy.py (host)
-    participant V as ⚔️ Valheim (kontener w VM)
+    participant V as ⚔️ Valheim (container in VM)
 
-    Note over P,T: oba węzły easy NAT → Tailscale przebija się na DIRECT (STUN/hole-punch)
-    P->>T: UDP do 100.103.236.80:2456 (tunel WireGuard, direct)
-    T->>X: pakiet ląduje na *:2456 hosta
-    X->>V: forward do 192.168.106.2:2456 (osobny socket per gracz)
-    V-->>X: odpowiedź serwera
-    X-->>P: z powrotem do właściwego gracza
-    Note over X: per-klient mapowanie → N graczy równocześnie (socat tego nie umiał)
+    Note over P,T: both ends easy NAT → Tailscale punches a DIRECT path (STUN/hole-punch)
+    P->>T: UDP to 100.x:2456 (WireGuard tunnel, direct)
+    T->>X: packet arrives on host *:2456
+    X->>V: forward to 192.168.106.2:2456 (one socket per client)
+    V-->>X: server reply
+    X-->>P: back to the right client
+    Note over X: per-client mapping → N players at once (socat couldn't do this)
 ```
 
 </details>
 
 ---
 
-## Skąd to wszystko wstaje jedną komendą
+## How it all comes up with one command
 
-`./scripts/play.sh` skleja warstwy w kolejności:
+`./scripts/play.sh` assembles the layers in order:
 
-1. `colima start … --network-address` → VM x86_64 + adres vmnet (warstwy 4-5),
-2. `docker compose up -d` → kontener + serwer (warstwy 6-7),
-3. `scripts/host-ts-bridge.sh start` → `udp-proxy.py` na hoście (warstwa 3),
-4. wypisuje **Join IP = adres węzła z hosta** (`tailscale ip -4`).
+1. `colima start … --network-address` → x86_64 VM + a vmnet address (layers 4-5),
+2. `docker compose up -d` → container + server (layers 6-7),
+3. `scripts/host-ts-bridge.sh start` → `udp-proxy.py` on the host (layer 3),
+4. prints the **Join IP = the host node's address** (`tailscale ip -4`).
 
-`./scripts/stop.sh` zwija to w odwrotnej kolejności (most → serwer → VM) + backup świata.
+`./scripts/stop.sh` unwinds it in reverse (bridge → server → VM) + backs up the world.
 
-> Wariant prosty (bez direct, ze starym sidecarem TS w VM) zostaje jako rollback:
-> `docker-compose.sidecar.yml` — patrz [ROADMAP.md](ROADMAP.md) „Rollback".
+> The simple variant (no direct P2P, old in-VM Tailscale sidecar) stays as a rollback:
+> `docker-compose.sidecar.yml` (restores the Tailscale node inside the VM — simpler, but laggy for remote players).

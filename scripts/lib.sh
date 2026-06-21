@@ -45,6 +45,6 @@ need_env() {
 
 vm_running() { colima status "$PROFILE" >/dev/null 2>&1; }   # exit code Colimy jest miarodajny (grep 'running' łapał też 'is not running')
 
-# Adres Tailscale węzła z serwerem = HOST Maca (węzeł macbook-priv). Od Opcji 1 Tailscale
+# Adres Tailscale węzła z serwerem = HOST Maca (węzeł na hoście). Od Opcji 1 Tailscale
 # biegnie na hoście, nie w VM (tylko host ma easy NAT → direct P2P). Patrz ROADMAP.md.
 ts_ip() { tailscale ip -4 2>/dev/null | head -1 || true; }

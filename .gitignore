@@ -19,3 +19,6 @@ SETUP-LOG.md
 # IDE
 .idea/
 .vscode/
+
+# Osobisty dziennik decyzji (prywatne IP/imiona) — local only
+ROADMAP.md

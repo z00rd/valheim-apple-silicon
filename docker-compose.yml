@@ -1,35 +1,32 @@
-# DOCELOWY compose dla Opcji 1 (Tailscale na HOŚCIE Maca, NIE w VM).
-# Patrz ROADMAP.md → "Opcja 1". Cutover: zatrzymaj stack na starym compose, podmień plik,
-# podnieś. Węzłem tailnetu staje się sam Mac (easy NAT ASUS) → direct P2P do Jaśka.
+# Compose for the "Tailscale on the HOST" architecture (direct P2P for remote players).
+# Tailscale runs on macOS itself (easy NAT), NOT in the VM — see ARCHITECTURE.md.
+# The container publishes the game's UDP ports; the host→VM bridge is set up by
+# scripts/host-ts-bridge.sh (udp-proxy.py), because Lima doesn't forward UDP. Tailscale on the
+# host exposes them at the node's 100.x address.
 #
-# RÓŻNICE vs docker-compose.yml:
-#  - usunięty sidecar `tailscale` (węzeł TS przenosi się na host macOS),
-#  - valheim NIE współdzieli już netns; publikuje porty UDP, które Colima forwarduje na host,
-#  - Tailscale na hoście serwuje te porty pod adresem 100.x Maca (subnet-route jako fallback).
-#
-# UWAGA (jedyne ryzyko): forward UDP przez Lima/Colima. Jeśli gra nie łapie połączenia mimo
-# `direct` w `tailscale ping` → fallback subnet-route (ROADMAP.md, sekcja "Ryzyko / fallback").
+# The simple variant with the old in-VM Tailscale sidecar (laggy for remote players) is in
+# docker-compose.sidecar.yml.
 
 services:
   valheim:
     image: ghcr.io/lloesche/valheim-server:latest
     container_name: valheim
     restart: unless-stopped
-    stop_grace_period: 2m               # czas na zapis świata przy zatrzymaniu
+    stop_grace_period: 2m               # time to save the world on shutdown
     cap_add:
       - SYS_NICE
     security_opt:
       - seccomp=unconfined              # known SteamCMD seccomp bug
     ports:
-      - "2456:2456/udp"                 # gra
+      - "2456:2456/udp"                 # game
       - "2457:2457/udp"                 # Steam query / A2S
     volumes:
-      - valheim-config:/config          # świat + backupy (worlds_local, backups)
-      - valheim-server:/opt/valheim     # pliki serwera (żeby nie pobierać ponownie)
+      - valheim-config:/config          # world + backups (worlds_local, backups)
+      - valheim-server:/opt/valheim     # server files (so we don't re-download)
     environment:
-      SERVER_NAME: ${SERVER_NAME:?Ustaw SERVER_NAME w .env}
-      WORLD_NAME: ${WORLD_NAME:?Ustaw WORLD_NAME w .env}
-      SERVER_PASS: ${SERVER_PASS:?Ustaw SERVER_PASS w .env (min. 5 znaków)}
+      SERVER_NAME: ${SERVER_NAME:?Set SERVER_NAME in .env}
+      WORLD_NAME: ${WORLD_NAME:?Set WORLD_NAME in .env}
+      SERVER_PASS: ${SERVER_PASS:?Set SERVER_PASS in .env (min. 5 chars)}
       SERVER_PUBLIC: "false"
       SERVER_PORT: "2456"
       TZ: ${TZ:-Europe/Warsaw}
@@ -40,8 +37,7 @@ services:
       UPDATE_CRON: "*/15 * * * *"
       UPDATE_IF_IDLE: "true"
       RESTART_IF_IDLE: "true"
-      STEAMCMD_ARGS: ""                 # bez 'validate' = szybki restart
-
+      STEAMCMD_ARGS: ""                 # no 'validate' = fast restart
 volumes:
   valheim-config:
   valheim-server:

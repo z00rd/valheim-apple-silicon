@@ -4,10 +4,10 @@
 # DLACZEGO: węzeł Tailscale MUSI być na hoście Maca (tylko host ma easy NAT; każdy węzeł
 # WEWNĄTRZ VM — slirp czy vmnet — ma symetryczny NAT, sprawdzone netcheckiem). Kontener
 # serwera publikuje 2456-2457/udp w VM, osiągalne z Maca pod adresem vmnet VM
-# (`colima --network-address`, np. 192.168.106.2). socat przerzuca te porty z Maca, a
-# Tailscale hosta wystawia je pod adresem 100.x węzła `macbook-priv`.
+# (`colima --network-address`, np. 192.168.106.2). udp-proxy.py przerzuca te porty z Maca, a
+# Tailscale hosta wystawia je pod adresem 100.x węzła na hoście.
 #
-#   Jasiek (easy) --direct--> Mac:2456 (host TS, easy NAT) --socat--> <VM_IP>:2456 --> kontener
+#   Zdalny gracz (easy) --direct--> Mac:2456 (host TS, easy NAT) --udp-proxy--> <VM_IP>:2456 --> kontener
 #
 # Wymaga: VM wstała z `--network-address`; `tailscale up` zrobiony na hoście; socat (brew).
 # UWAGA: to rozwiązanie jest PROWIZORYCZNE do czasu potwierdzenia wejściem zdalnego gracza,
