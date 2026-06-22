@@ -78,12 +78,17 @@ ensure_vm() {
   fi
 }
 
-# True once the server accepts players. Uses grep -c (consumes the whole stream) rather than
-# grep -q: under `set -o pipefail`, grep -q exiting early makes `docker compose logs` die with
-# SIGPIPE (141) and pipefail would report that as failure — a false "still starting".
+# True once the server is CURRENTLY accepting players. Scopes the log scan to THIS boot via the
+# container's StartedAt — the container keeps its logs across a `compose up` restart, so a plain
+# (or time-windowed) grep would match a stale "Opened Steam server"/heartbeat from a previous boot
+# and report ready too early. Markers: "Opened Steam server" once per boot, then "Connections N"
+# every ~10 min. grep -c (not -q): under `set -o pipefail`, grep -q exiting early makes
+# `docker compose logs` die with SIGPIPE (141), which pipefail would report as a false failure.
 server_ready() {
-  local n
-  n=$(compose logs valheim 2>/dev/null | grep -cE 'Opened Steam server|Connections [0-9]') || true
+  local started n
+  started=$(docker inspect -f '{{.State.StartedAt}}' valheim 2>/dev/null) || return 1
+  [ -n "$started" ] || return 1
+  n=$(compose logs --since "$started" valheim 2>/dev/null | grep -cE 'Opened Steam server|Connections [0-9]') || true
   [ "${n:-0}" -gt 0 ]
 }
 
