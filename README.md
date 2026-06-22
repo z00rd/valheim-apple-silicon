@@ -143,8 +143,9 @@ tailnet: `ssh user@<Mac-tailscale-IP>` → `cd ~/valheim-server && ./scripts/pla
 
 ## 😴 The Mac must not sleep while playing
 
-`play.sh` runs `caffeinate` (works with the lid open / on power). Lid closed:
-`sudo pmset -c disablesleep 1` before the session (`...disablesleep 0` after). Keep the Mac on power.
+`play.sh` runs `caffeinate -ims` — it keeps the **system** awake but lets the **display** sleep
+(a headless server doesn't need the screen on; saves a few watts). Works with the lid open / on power.
+Lid closed: `sudo pmset -c disablesleep 1` before the session (`...disablesleep 0` after). Keep the Mac on power.
 The server only runs while the Mac is **logged in** (Colima/docker live in the user session).
 
 ## 📊 What to expect (performance)

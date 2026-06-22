@@ -15,11 +15,13 @@ compose up -d
 info "Starting the UDP bridge (host->VM proxy)..."
 ensure_bridge
 
-# Keep-awake: the Mac won't sleep during the session (works with the lid OPEN / on power).
+# Keep-awake: keep the SYSTEM awake during the session but let the DISPLAY sleep (a headless server
+# doesn't need the screen — saves ~5-8 W). Flags: -i idle, -m disk, -s system-on-AC; we deliberately
+# drop -d (display) and -u (user-active), both of which would keep the panel lit.
 if [ -f "$CAFFEINATE_PID_FILE" ] && kill -0 "$(cat "$CAFFEINATE_PID_FILE" 2>/dev/null)" 2>/dev/null; then
   :
 else
-  nohup caffeinate -dimsu >/dev/null 2>&1 &
+  nohup caffeinate -ims >/dev/null 2>&1 &
   echo $! > "$CAFFEINATE_PID_FILE"
 fi
 
@@ -27,4 +29,4 @@ IP="$(ts_ip)"
 echo
 c_grn "Server is starting. Friends in game -> Join IP -> ${IP:-<./scripts/status.sh>}:2456"
 c_ylw "The Mac won't sleep during the session. When done, run:  ./scripts/stop.sh"
-c_ylw "caffeinate keeps the Mac awake with the lid OPEN / on power. Lid closed -> see README."
+c_ylw "Mac stays awake (display may sleep — that's fine); lid OPEN / on power. Lid closed -> see README."
