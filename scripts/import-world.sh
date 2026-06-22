@@ -20,8 +20,15 @@ base_fwl="$(basename "$FWL" .fwl)"
 vm_running || die "Run the server once first: ./scripts/setup.sh (creates the world volume)."
 docker ps --format '{{.Names}}' | grep -q '^valheim$' || die "The 'valheim' container is not running. Run ./scripts/play.sh and try again."
 
+docker exec valheim mkdir -p /config/worlds_local 2>/dev/null || true
+
+# Stop the server BEFORE copying. A running server holds the (old) world in memory and SAVES it on
+# shutdown — which would overwrite the file we just copied (Valheim rotates it to .db.old). So:
+# save+stop the old world first, THEN overwrite the files, THEN start so it loads the imported world.
+info "Saving & stopping the current server (so it can't overwrite the import)..."
+compose stop valheim
+
 info "Copying world '$base_db' into the server..."
-docker exec valheim mkdir -p /config/worlds_local
 docker cp "$DB"  "valheim:/config/worlds_local/$base_db.db"
 docker cp "$FWL" "valheim:/config/worlds_local/$base_db.fwl"
 
@@ -33,6 +40,6 @@ if [ -f "$ENV_FILE" ]; then
   c_grn "✔ Set WORLD_NAME=\"$base_db\" in .env"
 fi
 
-info "Restarting the server on the imported world..."
-compose up -d --force-recreate valheim
+info "Starting the server on the imported world..."
+compose up -d valheim
 c_grn "✔ Done. The server is loading world '$base_db'. Check ./scripts/logs.sh"
