@@ -16,7 +16,7 @@ if vm_running; then
   tailscale status 2>/dev/null | head -10 | sed 's/^/  /' || echo "  (tailscale not running on the host)"
 
   echo; echo "── Valheim server ──"
-  if compose logs --tail=400 valheim 2>/dev/null | grep -qE "Opened Steam server|Connections [0-9]"; then
+  if server_ready; then
     c_grn "  ✔ Server ready (Opened Steam server / heartbeat)"
   else
     c_ylw "  ⚠ Server still starting (first world generating?) — see ./scripts/logs.sh"

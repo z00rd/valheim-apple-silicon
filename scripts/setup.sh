@@ -16,7 +16,7 @@ compose up -d
 info "3/3  Waiting for the server to report readiness ('Opened Steam server') — it downloads the Valheim server, be patient..."
 ok=0
 for _ in $(seq 1 90); do
-  if compose logs valheim 2>/dev/null | grep -qE "Opened Steam server|Connections [0-9]"; then ok=1; break; fi
+  if server_ready; then ok=1; break; fi
   sleep 10; printf '.'
 done
 echo

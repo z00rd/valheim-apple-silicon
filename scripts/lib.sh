@@ -78,6 +78,15 @@ ensure_vm() {
   fi
 }
 
+# True once the server accepts players. Uses grep -c (consumes the whole stream) rather than
+# grep -q: under `set -o pipefail`, grep -q exiting early makes `docker compose logs` die with
+# SIGPIPE (141) and pipefail would report that as failure — a false "still starting".
+server_ready() {
+  local n
+  n=$(compose logs valheim 2>/dev/null | grep -cE 'Opened Steam server|Connections [0-9]') || true
+  [ "${n:-0}" -gt 0 ]
+}
+
 # Start the host->VM UDP bridge if Tailscale is up on the host; otherwise guide the user.
 ensure_bridge() {
   if tailscale status >/dev/null 2>&1; then
