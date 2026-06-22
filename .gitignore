@@ -2,7 +2,6 @@
 .env
 backups/
 .caffeinate.pid
-.udp-bridge.pids
 *.log
 
 # Local artifacts (bridge PID files, working compose copies, Python cache)

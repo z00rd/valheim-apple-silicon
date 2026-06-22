@@ -48,3 +48,42 @@ vm_running() { colima status "$PROFILE" >/dev/null 2>&1; }   # Colima's exit cod
 # Tailscale address of the server node = the Mac HOST (node on the host). Tailscale runs on the
 # host, not in the VM (only the host has easy NAT → direct P2P). See ARCHITECTURE.md.
 ts_ip() { tailscale ip -4 2>/dev/null | head -1 || true; }
+
+# The VM's vmnet address (reachable from the host), or empty if the VM isn't running or was
+# started without --network-address. Parses `colima list --json` (robust to column layout).
+vm_addr() {
+  colima list --json 2>/dev/null | python3 -c '
+import sys, json
+prof = sys.argv[1]
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: d = json.loads(line)
+    except Exception: continue
+    if d.get("name") == prof and d.get("status") == "Running":
+        print(d.get("address") or ""); break
+' "$PROFILE" 2>/dev/null
+}
+
+# Ensure the VM is up AND has a vmnet address (needed by the host->VM UDP bridge). Self-heals a VM
+# that is running without --network-address (e.g. created before this architecture) by restarting it.
+ensure_vm() {
+  if vm_running && [ -z "$(vm_addr)" ]; then
+    c_ylw "VM is running without a vmnet address — restarting it with --network-address..."
+    colima stop "$PROFILE" || true
+  fi
+  if ! vm_running; then
+    info "Starting the VM (x86_64 QEMU)... first run takes a while; --network-address may ask for sudo."
+    colima start "$PROFILE" --arch x86_64 --vm-type qemu --cpu "$VM_CPU" --memory "$VM_MEM" --disk "$VM_DISK" --network-address
+  fi
+}
+
+# Start the host->VM UDP bridge if Tailscale is up on the host; otherwise guide the user.
+ensure_bridge() {
+  if tailscale status >/dev/null 2>&1; then
+    "$PROJECT_DIR/scripts/host-ts-bridge.sh" start || c_ylw "UDP bridge didn't start — diagnose: ./scripts/host-ts-bridge.sh status"
+  else
+    c_ylw "Tailscale is not running on the HOST — run once:  sudo brew services start tailscale && tailscale up"
+    c_ylw "(needed so remote players get a direct link; then re-run ./scripts/play.sh)"
+  fi
+}

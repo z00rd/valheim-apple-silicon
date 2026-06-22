@@ -5,9 +5,15 @@ Replaces socat (whose 'UDP-LISTEN,fork' mangles demultiplexing with more than on
 client). Keeps a separate upstream socket per client, so replies from the VM go back to the right
 player. No dependencies (pure stdlib). One process per port.
 
+Robustness: a transient send error never takes the whole proxy down (it would drop every player on
+the port); a dead upstream socket (e.g. the container restarted) is dropped so the client can
+re-establish. Idle client mappings are reaped after `idle_sec` so the table doesn't grow forever.
+
 Usage: udp-proxy.py <listen_port> <target_ip> [target_port=listen_port] [idle_sec=180]
 """
 import socket, select, sys, time
+
+REAP_EVERY = 30.0  # how often to scan for idle clients (not per-packet)
 
 def main():
     if len(sys.argv) < 3:
@@ -22,23 +28,41 @@ def main():
     lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     lsock.bind(("0.0.0.0", lport))
 
-    clients = {}      # client_addr -> [upstream_sock, last_seen]
-    up_to_client = {} # upstream_sock -> client_addr
+    clients = {}       # client_addr -> [upstream_sock, last_seen]
+    up_to_ent = {}     # upstream_sock -> (client_addr, entry)   single reverse map (no double lookup)
+    socks = [lsock]
+    dirty = False      # rebuild `socks` only when client set changes (not every packet)
+    next_reap = time.monotonic() + REAP_EVERY
+
+    def drop(up):
+        info = up_to_ent.pop(up, None)
+        if info:
+            clients.pop(info[0], None)
+        try: up.close()
+        except OSError: pass
 
     while True:
-        socks = [lsock] + list(up_to_client.keys())
-        r, _, _ = select.select(socks, [], [], 30.0)
+        if dirty:
+            socks = [lsock] + list(up_to_ent.keys()); dirty = False
+        r, _, _ = select.select(socks, [], [], REAP_EVERY)
         now = time.monotonic()
         for s in r:
             if s is lsock:
-                data, caddr = lsock.recvfrom(65535)
+                try:
+                    data, caddr = lsock.recvfrom(65535)
+                except OSError:
+                    continue
                 ent = clients.get(caddr)
                 if ent is None:
                     up = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    up.connect((tip, tport))
+                    try:
+                        up.connect((tip, tport))
+                    except OSError:
+                        up.close(); continue
                     ent = [up, now]
                     clients[caddr] = ent
-                    up_to_client[up] = caddr
+                    up_to_ent[up] = (caddr, ent)
+                    dirty = True
                 else:
                     ent[1] = now
                 try:
@@ -46,23 +70,27 @@ def main():
                 except OSError:
                     pass
             else:
-                caddr = up_to_client.get(s)
+                info = up_to_ent.get(s)
                 try:
                     data, _ = s.recvfrom(65535)
                 except OSError:
+                    # upstream is dead (e.g. container restarted) → drop the mapping so the
+                    # client re-establishes on its next packet instead of looping on a dead socket
+                    drop(s); dirty = True
                     continue
-                if caddr is not None:
-                    lsock.sendto(data, caddr)
-                    ent = clients.get(caddr)
-                    if ent: ent[1] = now
-        # reap idle clients
-        for caddr, ent in list(clients.items()):
-            if now - ent[1] > idle:
-                up = ent[0]
-                up_to_client.pop(up, None)
-                clients.pop(caddr, None)
-                try: up.close()
-                except OSError: pass
+                if info is not None:
+                    caddr, ent = info
+                    try:
+                        lsock.sendto(data, caddr)
+                    except OSError:
+                        pass
+                    ent[1] = now
+        # reap idle clients — throttled, NOT on every packet
+        if now >= next_reap:
+            next_reap = now + REAP_EVERY
+            for caddr, ent in list(clients.items()):
+                if now - ent[1] > idle:
+                    drop(ent[0]); dirty = True
 
 if __name__ == "__main__":
     main()

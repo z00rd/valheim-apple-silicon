@@ -31,7 +31,7 @@ flowchart TB
         end
     end
 
-    J -- "WireGuard · direct (~11 ms)<br/>→ :2456" --> TS
+    J -- "WireGuard · direct<br/>→ :2456" --> TS
     L -- "WireGuard · LAN" --> TS
     TS --> PROXY
     PROXY -- "UDP → 192.168.106.2:2456" --> VMNET
@@ -95,7 +95,7 @@ Tailscale needs **easy NAT on both ends**. And the NAT type depends on **where**
                                  └── double NAT = SYMMETRIC  →  DERP relay  →  jitter / lag
 
  ✔ TS node ON the Mac HOST       Mac ─ router ─ internet
-                                 └── single EASY NAT  →  direct P2P  →  smooth (~11 ms)
+                                 └── single EASY NAT  →  direct P2P  →  smooth, low ping
 ```
 
 QEMU's symmetric NAT is an **artifact of virtualization**, not a property of your link. Verified
