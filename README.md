@@ -83,6 +83,7 @@ Day to day: **`./scripts/play.sh`** when you play, **`./scripts/stop.sh`** when 
 | `scripts/host-ts-bridge.sh` | the host→VM UDP bridge (start/stop/status); launched by `play.sh` |
 | `scripts/status.sh` | what's running + the address to share with friends |
 | `scripts/logs.sh` | live server logs |
+| `scripts/monitor.sh` | sample CPU/mem + top host processes during a session (lag diagnosis) |
 | `scripts/backup.sh` | dump the world to the Mac's disk (optionally to Google Drive) |
 | `scripts/update.sh` | update the container image |
 | `scripts/import-world.sh` | import an existing world (`.db` + `.fwl`) |
@@ -155,6 +156,29 @@ The server only runs while the Mac is **logged in** (Colima/docker live in the u
 - An idle server uses ~1 Mac core (a Valheim trait + QEMU overhead) — drops to 0 after `stop.sh`.
 - For ~3 casual players there's plenty of headroom. This is **not** a 24/7 server — the Mac must be
   awake and logged in.
+
+**If everyone lags at the same moment**, the server tick is stalling — usually because a background
+host process (Spotlight reindex, Time Machine, cloud sync) stole CPU from the x86 emulator. Since the
+server is authoritative, a host hiccup freezes all players at once (a single player lagging is *their*
+network instead). `play.sh` can `renice` QEMU to `-10` so it wins that contention. This is **optional**
+and `play.sh` works fine without it — by default it tries silently and skips (with a hint) if it can't,
+so a fresh clone never gets surprised by a password prompt. Controlled by `VALHEIM_RENICE`:
+
+| `VALHEIM_RENICE` | Behaviour |
+|---|---|
+| `auto` *(default)* | apply the boost **only if** the NOPASSWD rule below is installed; otherwise skip silently |
+| `ask` | prompt for your sudo password each session (no rule needed) — `VALHEIM_RENICE=ask ./scripts/play.sh` |
+| `off` | never touch priority |
+
+For unattended, prompt-free boosting, add a narrow NOPASSWD rule once (only `renice`, only your user):
+
+```bash
+echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/renice" | sudo tee /etc/sudoers.d/valheim-renice >/dev/null
+sudo chmod 0440 /etc/sudoers.d/valheim-renice && sudo visudo -cf /etc/sudoers.d/valheim-renice
+```
+
+To catch the culprit live next time, run `./scripts/monitor.sh [minutes]` during a session — it logs
+container/host CPU and the **top host processes** each tick to `/tmp/valheim-usage.log`.
 
 ## 🔐 Security
 

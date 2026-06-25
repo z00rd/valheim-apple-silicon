@@ -10,6 +10,11 @@ ensure_vm
 info "Bringing the server up..."
 compose up -d
 
+# Optionally give the emulator priority so a busy host can't starve the server tick (which would lag
+# every player at once). Off by default unless the NOPASSWD sudoers rule is set; VALHEIM_RENICE=ask
+# to be prompted instead. See prioritize_qemu() in lib.sh and the README.
+prioritize_qemu
+
 # Host->VM UDP bridge: Tailscale runs on the HOST (easy NAT → direct P2P), and the proxy relays the
 # game ports into the container in the VM. See ARCHITECTURE.md + scripts/host-ts-bridge.sh.
 info "Starting the UDP bridge (host->VM proxy)..."

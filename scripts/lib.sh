@@ -92,6 +92,32 @@ server_ready() {
   [ "${n:-0}" -gt 0 ]
 }
 
+# Give the x86 emulator a CPU edge. The server is a FULL x86->ARM emulation (QEMU TCG, no
+# hardware virt on Apple Silicon), so it's sensitive to losing CPU time: when the host gets
+# busy (Spotlight reindex, Time Machine, cloud sync) the emulation threads starve, the server
+# tick hitches, and EVERY connected player lags at the same instant. A negative nice lets QEMU
+# win that contention. Needs root for nice < 0; non-fatal if it can't (just warns).
+# NB: this is the host-process layer. Inside the VM the server already runs effectively alone,
+# so there's nothing to prioritize there; this is the layer that matters.
+prioritize_qemu() {
+  local mode="${VALHEIM_RENICE:-auto}" pid ok=0
+  [ "$mode" = off ] && return
+  pid="$(pgrep -f qemu-system-x86_64 | head -1)"
+  [ -n "$pid" ] || { c_ylw "QEMU process not found — skipping priority bump"; return; }
+  # Full path matches the optional /etc/sudoers.d/valheim-renice NOPASSWD rule exactly (see README).
+  if [ "$mode" = ask ]; then
+    sudo /usr/bin/renice -n -10 -p "$pid" >/dev/null && ok=1   # may prompt for a password
+  else
+    sudo -n /usr/bin/renice -n -10 -p "$pid" >/dev/null 2>&1 && ok=1   # never prompts; needs the sudoers rule
+  fi
+  if [ "$ok" = 1 ]; then
+    info "QEMU (pid $pid) reniced to -10 — wins CPU contention against background host work"
+  else
+    c_ylw "Priority boost skipped (optional, makes lag rarer under host load). To enable it: add the"
+    c_ylw "NOPASSWD sudoers rule (see README), or run  VALHEIM_RENICE=ask ./scripts/play.sh  to be prompted."
+  fi
+}
+
 # Start the host->VM UDP bridge if Tailscale is up on the host; otherwise guide the user.
 ensure_bridge() {
   if tailscale status >/dev/null 2>&1; then
