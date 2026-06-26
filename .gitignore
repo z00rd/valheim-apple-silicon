@@ -21,3 +21,6 @@ SETUP-LOG.md
 
 # Personal decision journal (private IPs/names) — local only
 ROADMAP.md
+
+# Local-only notes (machine-specific tooling, paths) — never commit
+*.local.md
