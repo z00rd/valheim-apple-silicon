@@ -6,6 +6,9 @@
 # Usage:  ./scripts/monitor.sh [minutes]   (default 10; samples every 30s)
 # Output: prints live and appends to /tmp/valheim-usage.log
 source "$(dirname "$0")/lib.sh"
+# lib.sh sets -euo pipefail; sampling is best-effort (a grep that matches nothing returns 1, a
+# closed pipe SIGPIPEs) — none of that should kill the monitor. Relax them for this script.
+set +eo pipefail
 
 MINS="${1:-10}"
 INTERVAL=30
